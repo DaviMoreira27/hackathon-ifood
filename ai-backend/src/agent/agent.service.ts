@@ -1,18 +1,19 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
-import type {
-  MessageParam,
-  ToolResultBlockParam,
-} from '@anthropic-ai/sdk/resources/messages.js';
+import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/messages.js';
 import { AuthService } from '../auth/auth.service.js';
 import { McpService, McpUnauthorizedError } from '../mcp/mcp.service.js';
+import { MessagesService } from '../messages/messages.service.js';
+import { UsersService } from '../users/users.service.js';
+import { messagesToRows, rowsToMessages } from './history.js';
 
 export const ANTHROPIC_CLIENT = Symbol('ANTHROPIC_CLIENT');
 
 const MODEL = 'claude-sonnet-5-5';
 const MAX_TOKENS = 4096;
 const MAX_TOOL_ROUNDS = 10;
-const MAX_HISTORY = 40;
+// Quantas linhas da tabela messages entram no contexto do LLM.
+const HISTORY_ROWS = 40;
 
 const SYSTEM_PROMPT = `Você é o assistente de pedidos em grupo do iFood.
 Seu papel é:
@@ -26,53 +27,76 @@ Sempre confirme o resumo dos carrinhos antes de fechar o pedido.
 Responda sempre em português brasileiro.`;
 
 const FALLBACK_REPLY = 'Desculpe, ocorreu um erro interno. Tente novamente.';
+// O link de login tem um state de uso único: o que fica no histórico é só um marcador.
+const LOGIN_MARKER = '[link de login do iFood enviado]';
+
+export interface ChatProfile {
+  name?: string;
+}
 
 @Injectable()
 export class AgentService {
   private readonly logger = new Logger(AgentService.name);
-  private readonly history = new Map<string, MessageParam[]>();
-  // Serializa as mensagens de um mesmo usuário para não rodar dois loops sobre o mesmo histórico.
-  private readonly queues = new Map<string, Promise<unknown>>();
+  // Serializa as mensagens de um mesmo chat para não rodar dois loops sobre o mesmo histórico.
+  private readonly queues = new Map<number, Promise<unknown>>();
 
   constructor(
     @Inject(ANTHROPIC_CLIENT) private readonly anthropic: Anthropic,
     private readonly auth: AuthService,
     private readonly mcp: McpService,
+    private readonly users: UsersService,
+    private readonly messages: MessagesService,
   ) {}
 
-  handle(userId: string, text: string): Promise<string> {
-    const previous = this.queues.get(userId) ?? Promise.resolve();
+  handle(chatId: number, text: string, profile?: ChatProfile): Promise<string> {
+    const previous = this.queues.get(chatId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
-      .then(() => this.process(userId, text));
-    this.queues.set(userId, next);
+      .then(() => this.process(chatId, text, profile));
+    this.queues.set(chatId, next);
     void next.finally(() => {
-      if (this.queues.get(userId) === next) this.queues.delete(userId);
+      if (this.queues.get(chatId) === next) this.queues.delete(chatId);
     });
     return next;
   }
 
-  private async process(userId: string, text: string): Promise<string> {
-    this.logger.log(`[agent] mensagem de ${userId}: ${JSON.stringify(text)}`);
+  private async process(
+    chatId: number,
+    text: string,
+    profile?: ChatProfile,
+  ): Promise<string> {
+    this.logger.log(
+      `[agent] mensagem do chat ${chatId}: ${JSON.stringify(text)}`,
+    );
     if (text.trim() === '/logout') {
-      await this.auth.logout(userId);
-      this.mcp.drop(userId);
-      this.history.delete(userId);
+      await this.auth.logout(chatId);
+      this.mcp.drop(chatId);
+      // Zera o contexto: a próxima conta não deve herdar ids de carrinho/itens da anterior.
+      await this.messages.clearChat(chatId);
       return 'Você saiu da sua conta iFood.';
     }
 
-    const token = await this.auth.getValidAccessToken(userId);
+    const user = await this.users.getOrCreateByTelegram(chatId, profile?.name);
+    await this.messages.add({
+      chatId,
+      userId: user.id,
+      role: 'user',
+      content: text,
+    });
+
+    const token = await this.auth.getValidAccessToken(chatId);
     if (!token) {
-      this.logger.log(`[agent] ${userId} sem login — enviando link`);
-      return this.loginReply(userId);
+      this.logger.log(`[agent] chat ${chatId} sem login — enviando link`);
+      return this.loginReply(chatId, user.id);
     }
 
     try {
-      const session = await this.mcp.getSession(userId, token);
-      const messages: MessageParam[] = [
-        ...(this.history.get(userId) ?? []),
-        { role: 'user', content: text },
-      ];
+      const session = await this.mcp.getSession(chatId, token);
+      // Já inclui a mensagem do usuário gravada acima.
+      const messages = rowsToMessages(
+        await this.messages.recent(chatId, HISTORY_ROWS),
+      );
+      const turnStart = messages.length;
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         this.logger.log(
@@ -92,14 +116,18 @@ export class AgentService {
         );
 
         if (response.stop_reason !== 'tool_use') {
-          this.history.set(userId, trimHistory(messages));
           const reply =
             response.content
               .filter((b) => b.type === 'text')
               .map((b) => b.text)
               .join('\n') || FALLBACK_REPLY;
+          // O turno inteiro (tool_use, tool_result e resposta) é gravado de uma vez,
+          // para o histórico nunca ficar com uma chamada de ferramenta sem resultado.
+          await this.messages.addMany(
+            messagesToRows(chatId, user.id, messages.slice(turnStart)),
+          );
           this.logger.log(
-            `[agent] resposta final para ${userId} após ${round + 1} rodada(s) (${reply.length} chars)`,
+            `[agent] resposta final para o chat ${chatId} após ${round + 1} rodada(s) (${reply.length} chars)`,
           );
           return reply;
         }
@@ -136,40 +164,35 @@ export class AgentService {
       }
 
       this.logger.warn(
-        `Limite de ${MAX_TOOL_ROUNDS} rodadas de ferramentas atingido para ${userId}`,
+        `Limite de ${MAX_TOOL_ROUNDS} rodadas de ferramentas atingido para o chat ${chatId}`,
       );
+      await this.messages.add({
+        chatId,
+        userId: user.id,
+        role: 'assistant',
+        content: FALLBACK_REPLY,
+      });
       return FALLBACK_REPLY;
     } catch (err) {
       if (err instanceof McpUnauthorizedError) {
         this.logger.warn(
-          `[agent] MCP recusou o token de ${userId} (401) — pedindo login de novo`,
+          `[agent] MCP recusou o token do chat ${chatId} (401) — pedindo login de novo`,
         );
-        this.auth.invalidate(userId);
-        this.mcp.drop(userId);
-        return this.loginReply(userId);
+        await this.auth.invalidate(chatId);
+        this.mcp.drop(chatId);
+        return this.loginReply(chatId, user.id);
       }
       throw err;
     }
   }
 
-  private loginReply(userId: string): string {
-    return `Para continuar, entre na sua conta iFood:\n${this.auth.buildLoginUrl(userId)}`;
+  private async loginReply(chatId: number, userId: number): Promise<string> {
+    await this.messages.add({
+      chatId,
+      userId,
+      role: 'assistant',
+      content: LOGIN_MARKER,
+    });
+    return `Para continuar, entre na sua conta iFood:\n${this.auth.buildLoginUrl(chatId)}`;
   }
-}
-
-// Mantém as últimas mensagens, começando sempre numa mensagem de texto do usuário
-// para não deixar tool_result sem o tool_use correspondente.
-export function trimHistory(messages: MessageParam[]): MessageParam[] {
-  if (messages.length <= MAX_HISTORY) return messages;
-  let start = messages.length - MAX_HISTORY;
-  while (
-    start < messages.length &&
-    !(
-      messages[start].role === 'user' &&
-      typeof messages[start].content === 'string'
-    )
-  ) {
-    start++;
-  }
-  return messages.slice(start);
 }

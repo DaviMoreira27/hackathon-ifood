@@ -25,7 +25,7 @@ export interface McpToolResult {
 @Injectable()
 export class McpService implements OnModuleDestroy {
   private readonly logger = new Logger(McpService.name);
-  private readonly sessions = new Map<string, McpSession>();
+  private readonly sessions = new Map<number, McpSession>();
 
   async onModuleDestroy(): Promise<void> {
     await Promise.allSettled(
@@ -33,14 +33,14 @@ export class McpService implements OnModuleDestroy {
     );
   }
 
-  async getSession(userId: string, accessToken: string): Promise<McpSession> {
-    const cached = this.sessions.get(userId);
+  async getSession(chatId: number, accessToken: string): Promise<McpSession> {
+    const cached = this.sessions.get(chatId);
     if (cached?.token === accessToken) {
-      this.logger.log(`[mcp] reutilizando sessão de ${userId}`);
+      this.logger.log(`[mcp] reutilizando sessão do chat ${chatId}`);
       return cached;
     }
     if (cached) {
-      this.sessions.delete(userId);
+      this.sessions.delete(chatId);
       await cached.client.close().catch(() => undefined);
     }
 
@@ -52,7 +52,7 @@ export class McpService implements OnModuleDestroy {
       requestInit: { headers: { Authorization: `Bearer ${accessToken}` } },
     });
 
-    this.logger.log(`[mcp] conectando em ${mcpUrl} para ${userId}...`);
+    this.logger.log(`[mcp] conectando em ${mcpUrl} para o chat ${chatId}...`);
     try {
       await client.connect(transport);
       const { tools } = await client.listTools();
@@ -65,14 +65,14 @@ export class McpService implements OnModuleDestroy {
           input_schema: t.inputSchema as Tool['input_schema'],
         })),
       };
-      this.sessions.set(userId, session);
+      this.sessions.set(chatId, session);
       this.logger.log(
-        `[mcp] conectado para ${userId} — ${session.tools.length} ferramentas: ${session.tools.map((t) => t.name).join(', ')}`,
+        `[mcp] conectado para o chat ${chatId} — ${session.tools.length} ferramentas: ${session.tools.map((t) => t.name).join(', ')}`,
       );
       return session;
     } catch (err) {
       this.logger.error(
-        `[mcp] falha ao conectar para ${userId}: ${String(err)}`,
+        `[mcp] falha ao conectar para o chat ${chatId}: ${String(err)}`,
       );
       await client.close().catch(() => undefined);
       throw this.mapError(err);
@@ -107,9 +107,9 @@ export class McpService implements OnModuleDestroy {
     }
   }
 
-  drop(userId: string): void {
-    const cached = this.sessions.get(userId);
-    this.sessions.delete(userId);
+  drop(chatId: number): void {
+    const cached = this.sessions.get(chatId);
+    this.sessions.delete(chatId);
     void cached?.client.close().catch(() => undefined);
   }
 

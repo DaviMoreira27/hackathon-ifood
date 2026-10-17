@@ -5,8 +5,10 @@ CREATE TYPE message_role AS ENUM ('user', 'assistant', 'tool');
 CREATE TABLE users (
   id               BIGSERIAL PRIMARY KEY,
   name             TEXT NOT NULL,
-  email            TEXT NOT NULL UNIQUE,
+  email            TEXT UNIQUE,
+  telegram_chat_id BIGINT UNIQUE,
   ifood_token      TEXT,
+  ifood_refresh_token TEXT,
   token_expires_at TIMESTAMPTZ
 );
 
@@ -32,6 +34,7 @@ CREATE TABLE messages (
   user_id    BIGINT REFERENCES users(id),
   role       message_role NOT NULL,
   content    TEXT NOT NULL,
+  payload    JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

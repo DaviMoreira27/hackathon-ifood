@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
+import { UsersService } from '../users/users.service.js';
 
 const AUTHORIZE_URL = 'https://id.ifood.com.br/authorize';
 const TOKEN_URL = 'https://id.ifood.com.br/token';
@@ -26,15 +27,9 @@ const DEFAULT_SCOPES = [
 ].join(' ');
 
 interface PendingAuth {
-  userId: string;
+  chatId: number;
   codeVerifier: string;
   createdAt: number;
-}
-
-interface UserTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
 }
 
 interface TokenResponse {
@@ -43,7 +38,7 @@ interface TokenResponse {
   expires_in: number;
 }
 
-type LoginListener = (userId: string) => void | Promise<void>;
+type LoginListener = (chatId: number) => void | Promise<void>;
 
 export function createCodeChallenge(codeVerifier: string): string {
   return createHash('sha256').update(codeVerifier).digest('base64url');
@@ -52,10 +47,12 @@ export function createCodeChallenge(codeVerifier: string): string {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  // Tudo em memória enquanto não há banco: reiniciar o processo exige novo login.
+  // Logins em andamento (PKCE) ficam em memória: valem 10 min, e reiniciar o back só invalida o link.
+  // Os tokens do iFood ficam no banco (tabela users), então sobrevivem a reinícios.
   private readonly pending = new Map<string, PendingAuth>();
-  private readonly tokens = new Map<string, UserTokens>();
   private readonly loginListeners: LoginListener[] = [];
+
+  constructor(private readonly users: UsersService) {}
 
   private get config() {
     return {
@@ -71,12 +68,12 @@ export class AuthService {
     this.loginListeners.push(listener);
   }
 
-  buildLoginUrl(userId: string): string {
+  buildLoginUrl(chatId: number): string {
     this.prunePending();
 
     const codeVerifier = randomBytes(32).toString('base64url');
     const state = randomBytes(16).toString('base64url');
-    this.pending.set(state, { userId, codeVerifier, createdAt: Date.now() });
+    this.pending.set(state, { chatId, codeVerifier, createdAt: Date.now() });
 
     const { clientId, redirectUri, scopes } = this.config;
     const params = new URLSearchParams({
@@ -89,12 +86,12 @@ export class AuthService {
       code_challenge_method: 'S256',
     });
     this.logger.log(
-      `[login] link gerado para usuário ${userId} (state=${state}, redirect_uri=${redirectUri})`,
+      `[login] link gerado para o chat ${chatId} (state=${state}, redirect_uri=${redirectUri})`,
     );
     return `${AUTHORIZE_URL}?${params.toString()}`;
   }
 
-  async handleCallback(code: string, state: string): Promise<string> {
+  async handleCallback(code: string, state: string): Promise<number> {
     const pending = this.pending.get(state);
     if (!pending || Date.now() - pending.createdAt > PENDING_TTL_MS) {
       this.logger.warn(
@@ -106,7 +103,7 @@ export class AuthService {
     this.pending.delete(state);
 
     this.logger.log(
-      `[callback] state válido para usuário ${pending.userId}, trocando code por tokens...`,
+      `[callback] state válido para o chat ${pending.chatId}, trocando code por tokens...`,
     );
     const { clientId, clientSecret, redirectUri } = this.config;
     const tokens = await this.requestTokens({
@@ -117,37 +114,37 @@ export class AuthService {
       client_secret: clientSecret,
       code_verifier: pending.codeVerifier,
     });
-    this.saveTokens(pending.userId, tokens);
+    await this.saveTokens(pending.chatId, tokens);
     this.logger.log(
-      `[callback] tokens recebidos para usuário ${pending.userId} (expira em ${tokens.expires_in}s)`,
+      `[callback] tokens recebidos e salvos para o chat ${pending.chatId} (expira em ${tokens.expires_in}s)`,
     );
 
     for (const listener of this.loginListeners) {
       try {
-        await listener(pending.userId);
+        await listener(pending.chatId);
       } catch (err) {
         this.logger.error(`Falha em listener de login: ${String(err)}`);
       }
     }
-    return pending.userId;
+    return pending.chatId;
   }
 
-  async getValidAccessToken(userId: string): Promise<string | null> {
-    const current = this.tokens.get(userId);
+  async getValidAccessToken(chatId: number): Promise<string | null> {
+    const current = await this.users.getIfoodTokens(chatId);
     if (!current) {
-      this.logger.log(`[token] usuário ${userId} sem token — precisa logar`);
+      this.logger.log(`[token] chat ${chatId} sem token — precisa logar`);
       return null;
     }
-    const remainingMs = current.expiresAt - Date.now();
+    const remainingMs = current.expiresAt.getTime() - Date.now();
     if (remainingMs > REFRESH_BUFFER_MS) {
       this.logger.log(
-        `[token] usuário ${userId} com token válido (${Math.round(remainingMs / 1000)}s restantes)`,
+        `[token] chat ${chatId} com token válido (${Math.round(remainingMs / 1000)}s restantes)`,
       );
       return current.accessToken;
     }
 
     this.logger.log(
-      `[token] token de ${userId} perto de expirar, renovando...`,
+      `[token] token do chat ${chatId} perto de expirar, renovando...`,
     );
     try {
       const { clientId, clientSecret } = this.config;
@@ -158,27 +155,27 @@ export class AuthService {
         client_secret: clientSecret,
       });
       // Tokens rotacionam a cada refresh: descarta o par anterior.
-      this.saveTokens(userId, tokens);
-      this.logger.log(`[token] token de ${userId} renovado`);
+      await this.saveTokens(chatId, tokens);
+      this.logger.log(`[token] token do chat ${chatId} renovado`);
       return tokens.access_token;
     } catch (err) {
-      this.logger.warn(`Refresh falhou para ${userId}: ${String(err)}`);
-      this.tokens.delete(userId);
+      this.logger.warn(`Refresh falhou para o chat ${chatId}: ${String(err)}`);
+      await this.users.clearIfoodTokens(chatId);
       return null;
     }
   }
 
-  invalidate(userId: string): void {
-    this.logger.warn(`[token] token de ${userId} invalidado`);
-    this.tokens.delete(userId);
+  async invalidate(chatId: number): Promise<void> {
+    this.logger.warn(`[token] token do chat ${chatId} invalidado`);
+    await this.users.clearIfoodTokens(chatId);
   }
 
-  async logout(userId: string): Promise<void> {
-    const current = this.tokens.get(userId);
-    this.tokens.delete(userId);
+  async logout(chatId: number): Promise<void> {
+    const current = await this.users.getIfoodTokens(chatId);
+    await this.users.clearIfoodTokens(chatId);
     if (!current) return;
 
-    this.logger.log(`[logout] revogando token de ${userId}`);
+    this.logger.log(`[logout] revogando token do chat ${chatId}`);
     const { clientId, clientSecret } = this.config;
     const response = await fetch(REVOKE_URL, {
       method: 'POST',
@@ -190,7 +187,9 @@ export class AuthService {
       }),
     });
     if (!response.ok)
-      this.logger.warn(`Revoke retornou ${response.status} para ${userId}`);
+      this.logger.warn(
+        `Revoke retornou ${response.status} para o chat ${chatId}`,
+      );
   }
 
   private async requestTokens(
@@ -212,11 +211,11 @@ export class AuthService {
     return (await response.json()) as TokenResponse;
   }
 
-  private saveTokens(userId: string, tokens: TokenResponse): void {
-    this.tokens.set(userId, {
+  private saveTokens(chatId: number, tokens: TokenResponse): Promise<void> {
+    return this.users.saveIfoodTokens(chatId, {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
-      expiresAt: Date.now() + tokens.expires_in * 1000,
+      expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
     });
   }
 

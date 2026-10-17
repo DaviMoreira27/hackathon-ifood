@@ -1,6 +1,19 @@
 import { ForbiddenException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import type { IfoodTokens, UsersService } from '../users/users.service.js';
 import { AuthService, createCodeChallenge } from './auth.service.js';
+
+// UsersService em memória: o que importa aqui é o contrato de tokens, não o SQL.
+class FakeUsers {
+  tokens = new Map<number, IfoodTokens>();
+  getIfoodTokens = async (chatId: number) => this.tokens.get(chatId) ?? null;
+  saveIfoodTokens = async (chatId: number, t: IfoodTokens) => {
+    this.tokens.set(chatId, t);
+  };
+  clearIfoodTokens = async (chatId: number) => {
+    this.tokens.delete(chatId);
+  };
+}
 
 const tokenResponse = (access: string, refresh: string, expiresIn = 3600) =>
   new Response(
@@ -14,10 +27,12 @@ const tokenResponse = (access: string, refresh: string, expiresIn = 3600) =>
 
 describe('AuthService', () => {
   let service: AuthService;
+  let users: FakeUsers;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    service = new AuthService();
+    users = new FakeUsers();
+    service = new AuthService(users as unknown as UsersService);
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -30,7 +45,7 @@ describe('AuthService', () => {
   });
 
   it('monta a URL de login com PKCE e state', () => {
-    const url = new URL(service.buildLoginUrl('42'));
+    const url = new URL(service.buildLoginUrl(42));
     expect(url.origin + url.pathname).toBe('https://id.ifood.com.br/authorize');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('state')!.length).toBeGreaterThanOrEqual(8);
@@ -47,19 +62,18 @@ describe('AuthService', () => {
   it('troca o code por tokens, envia o code_verifier e avisa os listeners', async () => {
     const listener = vi.fn();
     service.onLogin(listener);
-    const state = new URL(service.buildLoginUrl('42')).searchParams.get(
-      'state',
-    )!;
+    const state = new URL(service.buildLoginUrl(42)).searchParams.get('state')!;
     fetchMock.mockResolvedValueOnce(tokenResponse('access-1', 'refresh-1'));
 
-    await expect(service.handleCallback('the-code', state)).resolves.toBe('42');
+    await expect(service.handleCallback('the-code', state)).resolves.toBe(42);
 
     const body = fetchMock.mock.calls[0][1].body as URLSearchParams;
     expect(body.get('grant_type')).toBe('authorization_code');
     expect(body.get('code')).toBe('the-code');
     expect(body.get('code_verifier')).toBeTruthy();
-    expect(listener).toHaveBeenCalledWith('42');
-    await expect(service.getValidAccessToken('42')).resolves.toBe('access-1');
+    expect(listener).toHaveBeenCalledWith(42);
+    await expect(service.getValidAccessToken(42)).resolves.toBe('access-1');
+    expect(users.tokens.get(42)?.refreshToken).toBe('refresh-1');
     // state é de uso único
     await expect(
       service.handleCallback('the-code', state),
@@ -67,14 +81,12 @@ describe('AuthService', () => {
   });
 
   it('faz refresh quando faltam menos de 5 minutos e rotaciona os tokens', async () => {
-    const state = new URL(service.buildLoginUrl('42')).searchParams.get(
-      'state',
-    )!;
+    const state = new URL(service.buildLoginUrl(42)).searchParams.get('state')!;
     fetchMock.mockResolvedValueOnce(tokenResponse('access-1', 'refresh-1', 60));
     await service.handleCallback('code', state);
 
     fetchMock.mockResolvedValueOnce(tokenResponse('access-2', 'refresh-2'));
-    await expect(service.getValidAccessToken('42')).resolves.toBe('access-2');
+    await expect(service.getValidAccessToken(42)).resolves.toBe('access-2');
 
     const body = fetchMock.mock.calls[1][1].body as URLSearchParams;
     expect(body.get('grant_type')).toBe('refresh_token');
@@ -82,16 +94,28 @@ describe('AuthService', () => {
   });
 
   it('retorna null e esquece o usuário se o refresh falhar', async () => {
-    const state = new URL(service.buildLoginUrl('42')).searchParams.get(
-      'state',
-    )!;
+    const state = new URL(service.buildLoginUrl(42)).searchParams.get('state')!;
     fetchMock.mockResolvedValueOnce(tokenResponse('access-1', 'refresh-1', 60));
     await service.handleCallback('code', state);
 
     fetchMock.mockResolvedValueOnce(
       new Response('invalid_grant', { status: 400 }),
     );
-    await expect(service.getValidAccessToken('42')).resolves.toBeNull();
-    await expect(service.getValidAccessToken('42')).resolves.toBeNull();
+    await expect(service.getValidAccessToken(42)).resolves.toBeNull();
+    expect(users.tokens.has(42)).toBe(false);
+  });
+
+  it('logout apaga os tokens e revoga o refresh_token no iFood', async () => {
+    const state = new URL(service.buildLoginUrl(42)).searchParams.get('state')!;
+    fetchMock.mockResolvedValueOnce(tokenResponse('access-1', 'refresh-1'));
+    await service.handleCallback('code', state);
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    await service.logout(42);
+
+    expect(users.tokens.has(42)).toBe(false);
+    const body = fetchMock.mock.calls[1][1].body as URLSearchParams;
+    expect(fetchMock.mock.calls[1][0]).toBe('https://id.ifood.com.br/revoke');
+    expect(body.get('token')).toBe('refresh-1');
   });
 });

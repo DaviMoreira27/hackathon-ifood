@@ -32,9 +32,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     );
 
     // userId do agent = chat.id do Telegram, então dá para avisar o chat quando o login termina.
-    this.auth.onLogin((userId) =>
+    this.auth.onLogin((chatId) =>
       this.sendMessage(
-        Number(userId),
+        chatId,
         'Login no iFood feito ✅ Pode mandar seu pedido.',
       ),
     );
@@ -61,7 +61,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await this.withRetry('sendChatAction', () =>
         this.bot.sendChatAction(chatId, 'typing'),
       ).catch(() => undefined);
-      const reply = await this.agent.handle(String(chatId), msg.text);
+      const name =
+        [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') ||
+        msg.from?.username;
+      const reply = await this.agent.handle(chatId, msg.text, { name });
       await this.sendMessage(chatId, reply);
     } catch (err) {
       this.logger.error(

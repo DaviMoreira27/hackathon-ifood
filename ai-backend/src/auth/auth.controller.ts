@@ -46,8 +46,8 @@ export class AuthController {
     }
 
     try {
-      const userId = await this.authService.handleCallback(code, state);
-      this.logger.log(`[redirect] login concluído para usuário ${userId}`);
+      const chatId = await this.authService.handleCallback(code, state);
+      this.logger.log(`[redirect] login concluído para o chat ${chatId}`);
       return page('Login feito ✅ Pode voltar ao Telegram.');
     } catch (err) {
       this.logger.error(`[redirect] falha no login: ${String(err)}`);
