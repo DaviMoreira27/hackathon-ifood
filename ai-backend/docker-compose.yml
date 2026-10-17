@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ifood-postgres
+    environment:
+      POSTGRES_USER: ifood
+      POSTGRES_PASSWORD: ifood
+      POSTGRES_DB: ifood
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  pgdata:
