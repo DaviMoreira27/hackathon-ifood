@@ -1,3 +1,4 @@
+import 'dotenv/config'; // carrega .env antes de qualquer módulo
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 
