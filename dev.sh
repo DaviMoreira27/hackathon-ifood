@@ -251,7 +251,12 @@ service_pid() { # serviço → imprime o pid se estiver vivo
   return 1
 }
 
-http_ok() { curl -fs -o /dev/null --max-time 2 "http://127.0.0.1:$1/"; }
+# Qualquer resposta HTTP (até 404) indica que o servidor está ouvindo: nem todo serviço tem rota em /.
+http_ok() {
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$1/" || true)"
+  [ -n "$code" ] && [ "$code" != "000" ]
+}
 
 start_service() { # serviço
   local name=$1 dir port pid log i
