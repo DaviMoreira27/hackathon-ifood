@@ -4,10 +4,13 @@ import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from './../src/app.module.js';
 
-describe('AppController (e2e)', () => {
+// O AppModule agora usa o Postgres (schema mock_ifood): só roda com TEST_DATABASE_URL.
+describe.skipIf(!process.env.TEST_DATABASE_URL)('AppController (e2e)', () => {
   let app: INestApplication<App>;
 
   beforeEach(async () => {
+    process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+    process.env.RABBITMQ_URL = 'amqp://nobody:nobody@127.0.0.1:1';
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();

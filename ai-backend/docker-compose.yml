@@ -12,5 +12,20 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
+  # Eventos de pagamento: o mock do iFood publica payment.confirmed, o ai-backend consome.
+  # Painel: http://localhost:15672 (ifood / ifood)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ifood-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ifood
+      RABBITMQ_DEFAULT_PASS: ifood
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+
 volumes:
   pgdata:
+  rabbitdata:

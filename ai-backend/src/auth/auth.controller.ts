@@ -10,8 +10,18 @@ import {
 import type { Response } from 'express';
 import { AuthService } from './auth.service.js';
 
+const escapeHtml = (s: string) =>
+  s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
+        c
+      ]!,
+  );
+
+// A mensagem pode conter texto da query string (?error=...): sempre escapada, senão vira XSS refletido.
 const page = (message: string) =>
-  `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>iFood</title></head><body style="font-family:sans-serif;text-align:center;padding:48px 16px"><h2>${message}</h2></body></html>`;
+  `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>iFood</title></head><body style="font-family:sans-serif;text-align:center;padding:48px 16px"><h2>${escapeHtml(message)}</h2></body></html>`;
 
 @Controller()
 export class AuthController {

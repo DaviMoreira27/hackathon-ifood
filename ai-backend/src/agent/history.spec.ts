@@ -47,6 +47,42 @@ describe('rowsToMessages', () => {
   });
 });
 
+describe('rowsToMessages — reparo de tool_use órfão', () => {
+  it('converte em texto um tool_use sem tool_result (ex.: parou em max_tokens)', () => {
+    const toolUse = [
+      { type: 'text', text: 'vou fechar' },
+      { type: 'tool_use', id: 'a', name: 'checkout', input: {} },
+    ];
+
+    const messages = rowsToMessages([
+      row(1, 'user', 'fecha'),
+      row(2, 'assistant', 'vou fechar', toolUse),
+      row(3, 'user', 'e aí?'),
+    ]);
+
+    expect(messages).toEqual([
+      { role: 'user', content: 'fecha' },
+      { role: 'assistant', content: 'vou fechar' },
+      { role: 'user', content: 'e aí?' },
+    ]);
+  });
+
+  it('descarta tool_result sem o tool_use correspondente', () => {
+    const messages = rowsToMessages([
+      row(1, 'user', 'oi'),
+      row(2, 'assistant', 'olá'),
+      row(3, 'tool', 'x → r', [
+        { type: 'tool_result', tool_use_id: 'zz', content: 'r' },
+      ]),
+    ]);
+
+    expect(messages).toEqual([
+      { role: 'user', content: 'oi' },
+      { role: 'assistant', content: 'olá' },
+    ]);
+  });
+});
+
 describe('messagesToRows', () => {
   it('guarda texto legível em content e os blocos em payload', () => {
     const toolUse = [

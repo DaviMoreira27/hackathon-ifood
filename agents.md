@@ -164,12 +164,35 @@ Responsável por calcular a divisão e emitir os meios de pagamento.
 
 ---
 
-## Considerações de Múltiplos Carrinhos
+## Regras de carrinhos e pagadores
 
-Um grupo frequentemente quer pedir de restaurantes diferentes. A sessão suporta N carrinhos simultâneos:
+- Cada restaurante é **um carrinho**; cada carrinho gera um pedido independente no iFood.
+- Cada item tem **exatamente um pagador**.
+- Cada pessoa paga em **no máximo um carrinho** (o banco garante: `UNIQUE (participant_id)` em `cart_payers`). Quem quer itens de dois restaurantes precisa de outra pessoa pagando o segundo.
+- Carrinho com 1 item: um único pagador. Carrinho com 2 ou mais itens: itens diferentes podem ter pagadores diferentes.
+- Taxas e descontos do carrinho são divididos entre os pagadores **proporcionalmente ao valor dos itens** de cada um (maior resto, em centavos; a soma é sempre exatamente o total). Quem calcula é o sistema (`group-order/split.ts`), nunca o LLM.
+- O pedido só vai para o `checkout` do iFood depois que **todos pagaram**.
 
-- Cada carrinho pertence a **um** restaurante
-- Um participante pode ter itens em **múltiplos** carrinhos
-- A divisão de conta agrega todos os carrinhos do participante
-- Cada carrinho gera um pedido independente no iFood
-- O Orchestrator exibe os carrinhos agrupados por restaurante antes da confirmação
+## Pagamentos e eventos
+
+```
+group_confirm_order (ai-backend, após /confirmar do dono)
+  └─► cria payments (1 por pagador) e pede a cobrança ao mock:  POST /payments {reference = payments.id}
+        └─◄ token → link  http://localhost:<front>/pay/<token>   (enviado no Telegram, anexado pelo código)
+
+pagador abre o link no front ─► GET /payments/by-token/:token  e  POST …/pay   (mock do iFood)
+  └─► mock: UPDATE condicional + linha no outbox (mesma transação)
+        └─► OutboxPublisher ─► RabbitMQ  exchange ifood.payments / routing key payment.confirmed
+              └─► ai-backend.payments ─► PaymentEventsConsumer ─► PaymentsService.applyConfirmedEvent
+                    └─► payments → carts → orders (pago) + aviso no Telegram do dono
+```
+
+| Peça | Garantia |
+|---|---|
+| Outbox no mock | o evento nasce na mesma transação do pagamento; se o RabbitMQ estiver fora, espera e sai quando voltar (at-least-once) |
+| Fila durável + binding declarada também pelo mock | evento publicado antes do consumidor subir fica guardado |
+| `processed_events` + `FOR UPDATE` no pedido | consumidor idempotente e seguro com eventos simultâneos do mesmo pedido |
+| Retry (`.retry`, 5 s) e `.dlq` | falha transitória repete até 5 vezes; evento inválido/inconsistente (valor divergente, pagamento anulado) vai direto para a DLQ |
+
+Evento `payment.confirmed` v1: `{ eventId, type, version: 1, occurredAt, data: { paymentId, reference, amountCents, paidAt } }`.
+A topologia está duplicada em `ai-backend/src/payments/topology.ts` e `ifood-backend/src/events/topology.ts`: mudou um, mude o outro.

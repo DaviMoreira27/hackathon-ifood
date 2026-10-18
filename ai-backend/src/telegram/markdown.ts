@@ -4,6 +4,25 @@
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// Link com rótulo ([Pague aqui](url)) esconde o destino. Fora destes domínios, a URL aparece
+// escrita, para um texto injetado no LLM não conseguir disfarçar um link de phishing.
+function isTrustedHost(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url.replace(/&amp;/g, '&')).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  const trusted = [
+    'ifood.com.br',
+    ...(process.env.TRUSTED_LINK_HOSTS ?? '')
+      .split(',')
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean),
+  ];
+  return trusted.some((t) => host === t || host.endsWith(`.${t}`));
+}
+
 function formatInline(text: string): string {
   // Protege `código`, links e URLs antes das outras regras (ex.: "_" dentro de uma URL não vira itálico).
   const kept: string[] = [];
@@ -17,7 +36,9 @@ function formatInline(text: string): string {
     .replace(
       /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g,
       (_, label: string, url: string) =>
-        keep(`<a href="${url.replace(/"/g, '&quot;')}">${label}</a>`),
+        isTrustedHost(url)
+          ? keep(`<a href="${url.replace(/"/g, '&quot;')}">${label}</a>`)
+          : `${label} (${keep(url)})`,
     )
     .replace(/https?:\/\/[^\s<]+/g, (url) => keep(url));
 

@@ -4,12 +4,17 @@ import type {
   ToolResultBlockParam,
 } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Message, NewMessage } from '../messages/messages.service.js';
+import { shrinkToolResult } from './tool-policy.js';
 
 // Reconstrói a conversa do LLM a partir das linhas da tabela messages:
 //   user      → texto do usuário
 //   assistant → texto final, ou blocos (com tool_use) quando há payload
 //   tool      → blocos tool_result (payload), que a API espera como mensagem de user
-export function rowsToMessages(rows: Message[]): MessageParam[] {
+// maxToolResultChars encurta resultados de ferramentas antigos (ver shrinkToolResult).
+export function rowsToMessages(
+  rows: Message[],
+  maxToolResultChars = Infinity,
+): MessageParam[] {
   const out: MessageParam[] = [];
   let started = false;
 
@@ -31,9 +36,56 @@ export function rowsToMessages(rows: Message[]): MessageParam[] {
     } else if (row.payload != null) {
       out.push({
         role: 'user',
-        content: row.payload as ToolResultBlockParam[],
+        content: (row.payload as ToolResultBlockParam[]).map((b) =>
+          typeof b.content === 'string' && b.content.length > maxToolResultChars
+            ? { ...b, content: shrinkToolResult(b.content, maxToolResultChars) }
+            : b,
+        ),
       });
     }
+  }
+  return dropOrphanToolUses(out);
+}
+
+// A API recusa a conversa inteira (e o chat trava para sempre) se um tool_use não for seguido pelos
+// tool_result correspondentes, ou se aparecer um tool_result sem o tool_use. Isso pode vir de dados
+// antigos ou de um turno gravado pela metade: nesses casos fica só o texto do assistant.
+function dropOrphanToolUses(messages: MessageParam[]): MessageParam[] {
+  const toolUseIds = (m: MessageParam | undefined) =>
+    m?.role === 'assistant' && Array.isArray(m.content)
+      ? m.content.filter((b) => b.type === 'tool_use').map((b) => b.id)
+      : [];
+  const toolResultIds = (m: MessageParam | undefined) =>
+    m?.role === 'user' && Array.isArray(m.content)
+      ? m.content
+          .filter((b) => b.type === 'tool_result')
+          .map((b) => b.tool_use_id)
+      : [];
+
+  const out: MessageParam[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    const uses = toolUseIds(message);
+    if (uses.length > 0) {
+      const answered = new Set(toolResultIds(messages[i + 1]));
+      if (uses.every((id) => answered.has(id))) {
+        out.push(message);
+        continue;
+      }
+      const text = (message.content as ContentBlockParam[])
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n');
+      out.push({ role: 'assistant', content: text || '(ação não concluída)' });
+      continue;
+    }
+
+    const results = toolResultIds(message);
+    if (results.length > 0) {
+      const asked = new Set(toolUseIds(out.at(-1)));
+      if (!results.every((id) => asked.has(id))) continue;
+    }
+    out.push(message);
   }
   return out;
 }

@@ -6,8 +6,11 @@ import {
 } from '@nestjs/common';
 import TelegramBot from 'node-telegram-bot-api';
 import { AgentService } from '../agent/agent.service.js';
+import type { ReplyImage } from '../agent/images.js';
 import { AuthService } from '../auth/auth.service.js';
+import { PaymentsService } from '../payments/payments.service.js';
 import { markdownToTelegramHtml } from './markdown.js';
+import { formatPaymentNotice } from './payment-notice.js';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
@@ -17,6 +20,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly agent: AgentService,
     private readonly auth: AuthService,
+    private readonly payments: PaymentsService,
   ) {}
 
   onModuleInit(): void {
@@ -38,6 +42,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         'Login no iFood feito ✅ Pode mandar seu pedido.',
       ),
     );
+
+    // Pagamento confirmado (vindo do RabbitMQ): avisa o dono do pedido no chat dele.
+    this.payments.onPaymentApplied(async (applied) => {
+      if (applied.ownerChatId === null) return;
+      await this.sendMessage(applied.ownerChatId, formatPaymentNotice(applied));
+    });
 
     this.logger.log('Telegram bot iniciado com long polling');
   }
@@ -64,8 +74,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const name =
         [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') ||
         msg.from?.username;
-      const reply = await this.agent.handle(chatId, msg.text, { name });
-      await this.sendMessage(chatId, reply);
+      const reply = await this.agent.handleRich(chatId, msg.text, { name });
+      await this.sendPhotos(chatId, reply.images);
+      await this.sendMessage(chatId, reply.text);
     } catch (err) {
       this.logger.error(
         `Falha ao processar mensagem do chat ${chatId}: ${String(err)}`,
@@ -90,13 +101,53 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           }),
         );
       } catch (err) {
-        if (!isParseEntitiesError(err)) throw err;
-        // Telegram rejeita HTML malformado ("can't parse entities"): reenvia como texto puro.
+        if (!isBadRequest(err)) throw err;
+        // O Telegram rejeitou o HTML (ex.: "can't parse entities" ou um link que ele não aceita):
+        // reenvia como texto puro para a mensagem, e os links, nunca se perderem.
         this.logger.warn(
           `[telegram] HTML recusado para chat ${chatId}, reenviando sem formatação: ${String(err)}`,
         );
         await this.withRetry('sendMessage', () =>
           this.bot.sendMessage(chatId, chunk),
+        );
+      }
+    }
+  }
+
+  // Fotos de pratos/lojas (já validadas pelo agente). São um complemento do texto: qualquer falha
+  // aqui só é logada. O Telegram baixa cada URL; se uma falhar, o álbum inteiro é recusado, então
+  // tenta foto por foto.
+  async sendPhotos(chatId: number, images: ReplyImage[]): Promise<void> {
+    if (images.length === 0) return;
+    if (images.length > 1) {
+      try {
+        await this.withRetry('sendMediaGroup', () =>
+          this.bot.sendMediaGroup(
+            chatId,
+            images.map((image) => ({
+              type: 'photo' as const,
+              media: image.url,
+              caption: image.caption || undefined,
+            })),
+          ),
+        );
+        return;
+      } catch (err) {
+        this.logger.warn(
+          `[telegram] álbum recusado para chat ${chatId}, enviando uma a uma: ${String(err)}`,
+        );
+      }
+    }
+    for (const image of images) {
+      try {
+        await this.withRetry('sendPhoto', () =>
+          this.bot.sendPhoto(chatId, image.url, {
+            caption: image.caption || undefined,
+          }),
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[telegram] foto ignorada para chat ${chatId} (${image.url}): ${String(err)}`,
         );
       }
     }
@@ -142,12 +193,9 @@ function retryDelayMs(err: unknown, attempt: number): number | null {
   return null;
 }
 
-function isParseEntitiesError(err: unknown): boolean {
+function isBadRequest(err: unknown): boolean {
   const { response } = (err ?? {}) as TelegramError;
-  return (
-    response?.statusCode === 400 &&
-    /can't parse entities/i.test(response.body?.description ?? '')
-  );
+  return response?.statusCode === 400;
 }
 
 // Limite do Telegram é 4096 chars; deixa folga porque a conversão para HTML aumenta o texto.

@@ -2,6 +2,10 @@ import { ForbiddenException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { IfoodTokens, UsersService } from '../users/users.service.js';
 import { AuthService, createCodeChallenge } from './auth.service.js';
+import type {
+  PendingLogin,
+  PendingLoginsService,
+} from './pending-logins.service.js';
 
 // UsersService em memória: o que importa aqui é o contrato de tokens, não o SQL.
 class FakeUsers {
@@ -12,6 +16,19 @@ class FakeUsers {
   };
   clearIfoodTokens = async (chatId: number) => {
     this.tokens.delete(chatId);
+  };
+}
+
+// Logins pendentes em memória, com a mesma semântica de uso único do banco.
+class FakePending {
+  rows = new Map<string, PendingLogin>();
+  save = async (state: string, login: PendingLogin) => {
+    this.rows.set(state, login);
+  };
+  consume = async (state: string) => {
+    const row = this.rows.get(state) ?? null;
+    this.rows.delete(state);
+    return row;
   };
 }
 
@@ -32,7 +49,10 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     users = new FakeUsers();
-    service = new AuthService(users as unknown as UsersService);
+    service = new AuthService(
+      users as unknown as UsersService,
+      new FakePending() as unknown as PendingLoginsService,
+    );
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -44,12 +64,24 @@ describe('AuthService', () => {
     expect(createCodeChallenge('abc')).toBe(expected);
   });
 
-  it('monta a URL de login com PKCE e state', () => {
-    const url = new URL(service.buildLoginUrl(42));
+  it('monta a URL de login com PKCE e state', async () => {
+    const url = new URL(await service.buildLoginUrl(42));
     expect(url.origin + url.pathname).toBe('https://id.ifood.com.br/authorize');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('state')!.length).toBeGreaterThanOrEqual(8);
     expect(url.searchParams.get('code_verifier')).toBeNull();
+  });
+
+  it('o servidor de autenticação é configurável (IFOOD_AUTH_BASE_URL)', async () => {
+    process.env.IFOOD_AUTH_BASE_URL = 'https://dev-auth.ifood.com.br/';
+    try {
+      const url = new URL(await service.buildLoginUrl(42));
+      expect(url.origin + url.pathname).toBe(
+        'https://dev-auth.ifood.com.br/authorize',
+      );
+    } finally {
+      delete process.env.IFOOD_AUTH_BASE_URL;
+    }
   });
 
   it('rejeita callback com state desconhecido', async () => {
@@ -62,7 +94,9 @@ describe('AuthService', () => {
   it('troca o code por tokens, envia o code_verifier e avisa os listeners', async () => {
     const listener = vi.fn();
     service.onLogin(listener);
-    const state = new URL(service.buildLoginUrl(42)).searchParams.get('state')!;
+    const state = new URL(await service.buildLoginUrl(42)).searchParams.get(
+      'state',
+    )!;
     fetchMock.mockResolvedValueOnce(tokenResponse('access-1', 'refresh-1'));
 
     await expect(service.handleCallback('the-code', state)).resolves.toBe(42);
@@ -81,7 +115,9 @@ describe('AuthService', () => {
   });
 
   it('faz refresh quando faltam menos de 5 minutos e rotaciona os tokens', async () => {
-    const state = new URL(service.buildLoginUrl(42)).searchParams.get('state')!;
+    const state = new URL(await service.buildLoginUrl(42)).searchParams.get(
+      'state',
+    )!;
     fetchMock.mockResolvedValueOnce(tokenResponse('access-1', 'refresh-1', 60));
     await service.handleCallback('code', state);
 
@@ -94,7 +130,9 @@ describe('AuthService', () => {
   });
 
   it('retorna null e esquece o usuário se o refresh falhar', async () => {
-    const state = new URL(service.buildLoginUrl(42)).searchParams.get('state')!;
+    const state = new URL(await service.buildLoginUrl(42)).searchParams.get(
+      'state',
+    )!;
     fetchMock.mockResolvedValueOnce(tokenResponse('access-1', 'refresh-1', 60));
     await service.handleCallback('code', state);
 
@@ -106,7 +144,9 @@ describe('AuthService', () => {
   });
 
   it('logout apaga os tokens e revoga o refresh_token no iFood', async () => {
-    const state = new URL(service.buildLoginUrl(42)).searchParams.get('state')!;
+    const state = new URL(await service.buildLoginUrl(42)).searchParams.get(
+      'state',
+    )!;
     fetchMock.mockResolvedValueOnce(tokenResponse('access-1', 'refresh-1'));
     await service.handleCallback('code', state);
 

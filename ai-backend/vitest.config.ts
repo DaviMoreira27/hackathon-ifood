@@ -8,5 +8,8 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.spec.ts'],
+    // Os testes de integração dividem recursos reais (fila do RabbitMQ, outbox, banco): em sequência
+    // um arquivo não rouba o evento do outro.
+    fileParallelism: false,
   },
 });

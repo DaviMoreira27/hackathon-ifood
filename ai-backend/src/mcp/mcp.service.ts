@@ -5,8 +5,13 @@ import {
   StreamableHTTPError,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
+import { isReadOnlyTool, requiresConfirmation } from '../agent/tool-policy.js';
 
 export class McpUnauthorizedError extends Error {}
+
+// A descrição das ferramentas vai direto para o prompt: limita o tamanho para um servidor MCP
+// comprometido não conseguir injetar um "manual" inteiro de instruções.
+const MAX_TOOL_DESCRIPTION = 1024;
 
 const truncate = (s: string, max = 300) =>
   s.length > max ? `${s.slice(0, max)}… (+${s.length - max} chars)` : s;
@@ -15,6 +20,10 @@ export interface McpSession {
   token: string;
   client: Client;
   tools: Tool[];
+  // Ferramentas que só rodam depois de /confirmar (ver tool-policy).
+  confirmTools: Set<string>;
+  // Só leitura: podem rodar em paralelo quando o LLM pede várias no mesmo turno.
+  readOnlyTools: Set<string>;
 }
 
 export interface McpToolResult {
@@ -61,13 +70,23 @@ export class McpService implements OnModuleDestroy {
         client,
         tools: tools.map((t) => ({
           name: t.name,
-          description: t.description ?? '',
+          description: (t.description ?? '').slice(0, MAX_TOOL_DESCRIPTION),
           input_schema: t.inputSchema as Tool['input_schema'],
         })),
+        confirmTools: new Set(
+          tools
+            .filter((t) => requiresConfirmation(t.name, t.annotations))
+            .map((t) => t.name),
+        ),
+        readOnlyTools: new Set(
+          tools
+            .filter((t) => isReadOnlyTool(t.name, t.annotations))
+            .map((t) => t.name),
+        ),
       };
       this.sessions.set(chatId, session);
       this.logger.log(
-        `[mcp] conectado para o chat ${chatId} — ${session.tools.length} ferramentas: ${session.tools.map((t) => t.name).join(', ')}`,
+        `[mcp] conectado para o chat ${chatId} — ${session.tools.length} ferramentas: ${session.tools.map((t) => t.name).join(', ')} (exigem confirmação: ${[...session.confirmTools].join(', ') || 'nenhuma'})`,
       );
       return session;
     } catch (err) {
@@ -100,6 +119,13 @@ export class McpService implements OnModuleDestroy {
       this.logger.log(
         `[mcp] ← ${name} ${isError ? 'ERRO' : 'ok'} (${Date.now() - startedAt}ms) ${truncate(text)}`,
       );
+      // MCP_LOG_RAW=1 registra a saída inteira: serve para descobrir os campos reais (preço,
+      // taxa, imagem) de cada ferramenta. Contém dados pessoais: não deixe ligado em produção.
+      if (process.env.MCP_LOG_RAW === '1') {
+        this.logger.debug(
+          `[mcp] saída crua de ${name}: ${JSON.stringify(result)}`,
+        );
+      }
       return { text, isError };
     } catch (err) {
       this.logger.error(`[mcp] ✗ ${name} falhou: ${String(err)}`);

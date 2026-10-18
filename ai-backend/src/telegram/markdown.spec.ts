@@ -35,4 +35,14 @@ describe('markdownToTelegramHtml', () => {
       `Entre: ${url.replace(/&/g, '&amp;')}`,
     );
   });
+
+  it('mostra a URL de links com rótulo fora dos domínios confiáveis', () => {
+    expect(
+      markdownToTelegramHtml(
+        '[Pague aqui](https://ifood.com.br.golpe.com/pix) ou [app](https://pedido.ifood.com.br/x)',
+      ),
+    ).toBe(
+      'Pague aqui (https://ifood.com.br.golpe.com/pix) ou <a href="https://pedido.ifood.com.br/x">app</a>',
+    );
+  });
 });

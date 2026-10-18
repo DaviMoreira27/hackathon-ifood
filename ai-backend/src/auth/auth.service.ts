@@ -1,12 +1,13 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import { UsersService } from '../users/users.service.js';
+import { PendingLoginsService } from './pending-logins.service.js';
 
-const AUTHORIZE_URL = 'https://id.ifood.com.br/authorize';
-const TOKEN_URL = 'https://id.ifood.com.br/token';
-const REVOKE_URL = 'https://id.ifood.com.br/revoke';
+// Servidor de autenticação do iFood. A documentação cita id.ifood.com.br (página Implementation)
+// e auth.ifood.com.br / dev-auth.ifood.com.br (índice llms.txt): configurável por IFOOD_AUTH_BASE_URL.
+const authUrl = (path: string) =>
+  `${(process.env.IFOOD_AUTH_BASE_URL ?? 'https://id.ifood.com.br').replace(/\/+$/, '')}/${path}`;
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-const PENDING_TTL_MS = 10 * 60 * 1000;
 // Sem mcp.cart.payment (consulta de meios de pagamento) por enquanto.
 const DEFAULT_SCOPES = [
   'mcp.user.basic.read',
@@ -26,12 +27,6 @@ const DEFAULT_SCOPES = [
   'mcp.orders.read',
 ].join(' ');
 
-interface PendingAuth {
-  chatId: number;
-  codeVerifier: string;
-  createdAt: number;
-}
-
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
@@ -47,12 +42,14 @@ export function createCodeChallenge(codeVerifier: string): string {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  // Logins em andamento (PKCE) ficam em memória: valem 10 min, e reiniciar o back só invalida o link.
-  // Os tokens do iFood ficam no banco (tabela users), então sobrevivem a reinícios.
-  private readonly pending = new Map<string, PendingAuth>();
   private readonly loginListeners: LoginListener[] = [];
 
-  constructor(private readonly users: UsersService) {}
+  // Tokens (cifrados) e logins em andamento ficam no banco: reiniciar o back não desloga ninguém
+  // nem invalida o link de login que acabou de ser enviado.
+  constructor(
+    private readonly users: UsersService,
+    private readonly pending: PendingLoginsService,
+  ) {}
 
   private get config() {
     return {
@@ -68,12 +65,10 @@ export class AuthService {
     this.loginListeners.push(listener);
   }
 
-  buildLoginUrl(chatId: number): string {
-    this.prunePending();
-
+  async buildLoginUrl(chatId: number): Promise<string> {
     const codeVerifier = randomBytes(32).toString('base64url');
     const state = randomBytes(16).toString('base64url');
-    this.pending.set(state, { chatId, codeVerifier, createdAt: Date.now() });
+    await this.pending.save(state, { chatId, codeVerifier });
 
     const { clientId, redirectUri, scopes } = this.config;
     const params = new URLSearchParams({
@@ -88,19 +83,17 @@ export class AuthService {
     this.logger.log(
       `[login] link gerado para o chat ${chatId} (state=${state}, redirect_uri=${redirectUri})`,
     );
-    return `${AUTHORIZE_URL}?${params.toString()}`;
+    return `${authUrl('authorize')}?${params.toString()}`;
   }
 
   async handleCallback(code: string, state: string): Promise<number> {
-    const pending = this.pending.get(state);
-    if (!pending || Date.now() - pending.createdAt > PENDING_TTL_MS) {
+    const pending = await this.pending.consume(state);
+    if (!pending) {
       this.logger.warn(
-        `[callback] state ${state} ${pending ? 'expirado' : 'desconhecido'} (o back reiniciou ou o link já foi usado?)`,
+        `[callback] state ${state} desconhecido, expirado ou já usado`,
       );
-      this.pending.delete(state);
       throw new ForbiddenException('State inválido ou expirado.');
     }
-    this.pending.delete(state);
 
     this.logger.log(
       `[callback] state válido para o chat ${pending.chatId}, trocando code por tokens...`,
@@ -177,7 +170,7 @@ export class AuthService {
 
     this.logger.log(`[logout] revogando token do chat ${chatId}`);
     const { clientId, clientSecret } = this.config;
-    const response = await fetch(REVOKE_URL, {
+    const response = await fetch(authUrl('revoke'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -195,7 +188,7 @@ export class AuthService {
   private async requestTokens(
     body: Record<string, string>,
   ): Promise<TokenResponse> {
-    const response = await fetch(TOKEN_URL, {
+    const response = await fetch(authUrl('token'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(body),
@@ -217,12 +210,5 @@ export class AuthService {
       refreshToken: tokens.refresh_token,
       expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
     });
-  }
-
-  private prunePending(): void {
-    const now = Date.now();
-    for (const [state, entry] of this.pending) {
-      if (now - entry.createdAt > PENDING_TTL_MS) this.pending.delete(state);
-    }
   }
 }

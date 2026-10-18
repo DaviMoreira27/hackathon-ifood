@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { and, eq, isNotNull, notLike, or } from 'drizzle-orm';
 import { DbService } from '../db/db.service.js';
 import { users } from '../db/schema.js';
+import { TokenCipher } from './token-cipher.js';
 
 export type User = typeof users.$inferSelect;
 
@@ -11,12 +12,73 @@ export interface IfoodTokens {
   expiresAt: Date;
 }
 
+type TokenField = 'access' | 'refresh';
+
+// O contexto (AAD) amarra o segredo ao usuário e à coluna: copiar o valor cifrado para outra
+// linha ou coluna do banco não funciona.
+const contextOf = (chatId: number, field: TokenField) =>
+  `ifood:${field}:${chatId}`;
+
 @Injectable()
-export class UsersService {
-  constructor(private readonly database: DbService) {}
+export class UsersService implements OnModuleInit {
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(
+    private readonly database: DbService,
+    private readonly cipher: TokenCipher,
+  ) {}
 
   private get db() {
     return this.database.db;
+  }
+
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.encryptLegacyTokens();
+    } catch (err) {
+      // Banco fora do ar no boot não derruba o app; tokens antigos continuam legíveis e a
+      // migração roda no próximo boot.
+      this.logger.error(`Não consegui cifrar tokens antigos: ${String(err)}`);
+    }
+  }
+
+  // Tokens gravados antes da cifra existir (texto puro) são cifrados uma vez, no boot.
+  async encryptLegacyTokens(): Promise<number> {
+    const legacy = await this.db
+      .select()
+      .from(users)
+      .where(
+        and(
+          isNotNull(users.telegramChatId),
+          or(
+            and(isNotNull(users.ifoodToken), notLike(users.ifoodToken, 'v1:%')),
+            and(
+              isNotNull(users.ifoodRefreshToken),
+              notLike(users.ifoodRefreshToken, 'v1:%'),
+            ),
+          ),
+        ),
+      );
+    for (const user of legacy) {
+      const chatId = user.telegramChatId as number;
+      await this.db
+        .update(users)
+        .set({
+          ifoodToken: this.protect(user.ifoodToken, chatId, 'access'),
+          ifoodRefreshToken: this.protect(
+            user.ifoodRefreshToken,
+            chatId,
+            'refresh',
+          ),
+        })
+        .where(eq(users.id, user.id));
+    }
+    if (legacy.length > 0) {
+      this.logger.log(
+        `${legacy.length} usuário(s) com tokens em texto puro foram cifrados`,
+      );
+    }
+    return legacy.length;
   }
 
   async findByTelegramChatId(chatId: number): Promise<User | undefined> {
@@ -47,17 +109,25 @@ export class UsersService {
     if (!user?.ifoodToken || !user.ifoodRefreshToken || !user.tokenExpiresAt) {
       return null;
     }
-    return {
-      accessToken: user.ifoodToken,
-      refreshToken: user.ifoodRefreshToken,
-      expiresAt: user.tokenExpiresAt,
-    };
+    try {
+      return {
+        accessToken: this.reveal(user.ifoodToken, chatId, 'access'),
+        refreshToken: this.reveal(user.ifoodRefreshToken, chatId, 'refresh'),
+        expiresAt: user.tokenExpiresAt,
+      };
+    } catch (err) {
+      // Chave trocada ou dado alterado: trata como "não logado" (o usuário entra de novo).
+      this.logger.warn(
+        `Tokens do chat ${chatId} não puderam ser decifrados — pedindo novo login: ${String(err)}`,
+      );
+      return null;
+    }
   }
 
   async saveIfoodTokens(chatId: number, tokens: IfoodTokens): Promise<void> {
     const columns = {
-      ifoodToken: tokens.accessToken,
-      ifoodRefreshToken: tokens.refreshToken,
+      ifoodToken: this.protect(tokens.accessToken, chatId, 'access'),
+      ifoodRefreshToken: this.protect(tokens.refreshToken, chatId, 'refresh'),
       tokenExpiresAt: tokens.expiresAt,
     };
     await this.db
@@ -75,5 +145,21 @@ export class UsersService {
       .update(users)
       .set({ ifoodToken: null, ifoodRefreshToken: null, tokenExpiresAt: null })
       .where(eq(users.telegramChatId, chatId));
+  }
+
+  private protect(
+    value: string | null,
+    chatId: number,
+    field: TokenField,
+  ): string | null {
+    if (value === null || this.cipher.isEncrypted(value)) return value;
+    return this.cipher.encrypt(value, contextOf(chatId, field));
+  }
+
+  // Valor sem o prefixo "v1:" é token antigo em texto puro (ainda não migrado): continua valendo.
+  private reveal(value: string, chatId: number, field: TokenField): string {
+    return this.cipher.isEncrypted(value)
+      ? this.cipher.decrypt(value, contextOf(chatId, field))
+      : value;
   }
 }

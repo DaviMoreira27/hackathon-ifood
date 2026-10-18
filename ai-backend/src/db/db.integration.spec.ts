@@ -1,11 +1,19 @@
 import { eq, inArray } from 'drizzle-orm';
 import type Anthropic from '@anthropic-ai/sdk';
 import { AgentService } from '../agent/agent.service.js';
+import { wrapToolResult } from '../agent/tool-policy.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { McpService } from '../mcp/mcp.service.js';
+import { GroupOrderService } from '../group-order/group-order.service.js';
+import { GroupOrderTools } from '../group-order/group-order.tools.js';
+import { DietaryService } from '../dietary/dietary.service.js';
+import { DietaryTools } from '../dietary/dietary.tools.js';
+import { PaymentProviderClient } from '../payments/payment-provider.client.js';
+import { PaymentsService } from '../payments/payments.service.js';
 import { CartsService } from '../carts/carts.service.js';
 import { MessagesService } from '../messages/messages.service.js';
 import { OrdersService } from '../orders/orders.service.js';
+import { TokenCipher } from '../users/token-cipher.js';
 import { UsersService } from '../users/users.service.js';
 import { DbService } from './db.service.js';
 import { messages, orders, users } from './schema.js';
@@ -24,7 +32,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
   beforeAll(() => {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
     database = new DbService();
-    usersService = new UsersService(database);
+    process.env.TOKEN_ENCRYPTION_KEY ??= 'a'.repeat(43) + '=';
+    usersService = new UsersService(database, new TokenCipher());
     messagesService = new MessagesService(database);
     ordersService = new OrdersService(database);
     cartsService = new CartsService(database);
@@ -191,11 +200,21 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
       anthropic as unknown as Anthropic,
       { getValidAccessToken: async () => 't' } as unknown as AuthService,
       {
-        getSession: async () => ({ tools: [] }),
+        getSession: async () => ({
+          tools: [{ name: 'search' }],
+          confirmTools: new Set<string>(),
+        }),
         callTool: async () => ({ text: '{"id":"item-9"}', isError: false }),
       } as unknown as McpService,
       usersService,
       messagesService,
+      new GroupOrderTools(
+        new GroupOrderService(
+          database,
+          new PaymentsService(database, new PaymentProviderClient()),
+        ),
+      ),
+      new DietaryTools(new DietaryService(database)),
     );
 
     expect(await agent.handle(chat, 'procura x', { name: 'Maria' })).toBe(
@@ -219,7 +238,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
     expect(third[2].content[0]).toMatchObject({
       type: 'tool_result',
       tool_use_id: 'tu1',
-      content: '{"id":"item-9"}',
+      content: wrapToolResult('search', '{"id":"item-9"}'),
     });
     const rows = await messagesService.recent(chat, 20);
     expect(rows.map((r) => r.role)).toEqual([
