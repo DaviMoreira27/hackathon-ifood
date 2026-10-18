@@ -650,38 +650,41 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('GroupOrderService', () => {
       expect((await orderRow()).status).toBe('paid');
     });
 
-    it('com mais de um pedido pago, finalizar exige o order_id', async () => {
-      // primeiro pedido, pago
+    it('começar um pedido novo descarta o pedido pago que não foi enviado', async () => {
+      // primeiro pedido, pago mas nunca enviado (ex.: o envio deu erro)
       await confirmed();
       for (const p of await payRows('pending'))
         await markPaid(p.id, Math.round(Number(p.amount) * 100));
       const firstOrder = await orderRow();
-      // segundo pedido, pago
+      expect(
+        (await service.getOrderView(userId)).awaiting_finalization,
+      ).toHaveLength(1);
+
+      // segundo pedido: o primeiro sai de cena
       await setup(['Ana', 'Bia']);
-      await service.syncCart(userId, pizzaria());
-      await service.assignPayer(userId, {
-        ifoodCartId: 'cart-pizza',
-        itemId: 'pizza',
-        participantName: 'Ana',
-      });
-      await service.assignPayer(userId, {
-        ifoodCartId: 'cart-pizza',
-        itemId: 'refri',
-        participantName: 'Bia',
-      });
-      await service.confirmOrder(userId);
+      const [{ status }] = await database.db
+        .select({ status: orders.status })
+        .from(orders)
+        .where(eq(orders.id, firstOrder.id));
+      expect(status).toBe('cancelled');
+      expect(
+        (await service.getOrderView(userId)).awaiting_finalization,
+      ).toEqual([]);
+      expect(await service.hasPaidOrder(userId)).toBe(false);
+    });
+
+    it('finalizar sem order_id usa o único pedido pago; order_id errado é recusado', async () => {
+      await confirmed();
       for (const p of await payRows('pending'))
         await markPaid(p.id, Math.round(Number(p.amount) * 100));
+      const paid = await orderRow();
 
-      await rejects(service.markFinalized(userId), /mais de um pedido pago/);
       await rejects(
         service.markFinalized(userId, 999_999_999),
         /não está aguardando finalização/,
       );
-      expect(
-        (await service.markFinalized(userId, firstOrder.id)).order_id,
-      ).toBe(firstOrder.id);
-      expect(await service.hasPaidOrder(userId)).toBe(true); // o outro continua pago
+      expect((await service.markFinalized(userId)).order_id).toBe(paid.id);
+      expect(await service.hasPaidOrder(userId)).toBe(false);
     });
   });
 

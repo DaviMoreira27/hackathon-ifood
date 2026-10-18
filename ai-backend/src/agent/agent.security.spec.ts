@@ -130,7 +130,7 @@ describe('AgentService — segurança', () => {
       expect(reply).toContain('Vou fechar o pedido');
       expect(reply).toContain('Confirmação necessária');
       // Texto para humanos: sem nome de ferramenta nem JSON dos argumentos.
-      expect(reply).toContain('Responda **confirmar**');
+      expect(reply).toContain('responda **confirmar**');
       expect(reply).not.toContain('checkout_cart');
       expect(reply).not.toContain('cartId');
       const blocked = lastSent(1);
@@ -152,9 +152,10 @@ describe('AgentService — segurança', () => {
       // O tool_use sintético e o resultado ficam no histórico.
       expect(db.rows.map((r) => r.role)).toContain('tool');
 
-      // Confirmação é de uso único.
+      // Confirmação é de uso único: o segundo "confirmar" vira conversa e não executa nada.
+      create.mockResolvedValueOnce(textReply('Não há nada pendente.'));
       const again = await agent.handle(CHAT, '/confirmar');
-      expect(again).toContain('Não há nenhuma ação aguardando');
+      expect(again).toBe('Não há nada pendente.');
       expect(mcp.callTool).toHaveBeenCalledTimes(1);
     });
 
@@ -163,9 +164,10 @@ describe('AgentService — segurança', () => {
       create.mockResolvedValueOnce(textReply('ok'));
       await agent.handle(CHAT, 'na verdade, espera');
 
+      create.mockResolvedValueOnce(textReply('Confirmar o quê?'));
       const reply = await agent.handle(CHAT, '/confirmar');
 
-      expect(reply).toContain('Não há nenhuma ação aguardando');
+      expect(reply).toBe('Confirmar o quê?');
       expect(mcp.callTool).not.toHaveBeenCalled();
     });
 
@@ -188,6 +190,15 @@ describe('AgentService — segurança', () => {
       }
     });
 
+    it('avisa o canal (botões) só enquanto há ação esperando confirmação', async () => {
+      const asked = await agent.handleRich(CHAT, 'fecha o pedido');
+      expect(asked.awaitingConfirmation).toBe(true);
+
+      create.mockResolvedValueOnce(textReply('Pedido feito!'));
+      const done = await agent.handleRich(CHAT, 'confirmar');
+      expect(done.awaitingConfirmation).toBe(false);
+    });
+
     it('uma frase que só contém a palavra ("pode confirmar") não confirma', async () => {
       await agent.handle(CHAT, 'fecha o pedido');
       create.mockResolvedValueOnce(textReply('ok, me diga quando'));
@@ -197,15 +208,38 @@ describe('AgentService — segurança', () => {
       expect(mcp.callTool).not.toHaveBeenCalled();
     });
 
-    it('"confirmar" sem nada pendente segue como conversa normal, mas "/confirmar" avisa', async () => {
+    it('"confirmar" sem nada pendente (com ou sem barra) vai ao LLM, que pode pedir a ação de verdade', async () => {
       create.mockReset();
-      create.mockResolvedValueOnce(textReply('Confirmar o quê?'));
+      create
+        .mockResolvedValueOnce(textReply('Confirmar o quê?'))
+        // o LLM só tinha perguntado "posso fechar?": agora chama a ferramenta e cai no portão
+        .mockResolvedValueOnce(
+          toolUseReply('tu9', 'checkout_cart', { cartId: 'c1' }),
+        )
+        .mockResolvedValueOnce(textReply('Vou fechar o pedido'));
 
       expect(await agent.handle(CHAT, 'confirmar')).toBe('Confirmar o quê?');
-      expect(await agent.handle(CHAT, '/confirmar')).toContain(
-        'Não há nenhuma ação aguardando',
-      );
+      const reply = await agent.handleRich(CHAT, '/confirmar');
+
       expect(mcp.callTool).not.toHaveBeenCalled();
+      expect(reply.awaitingConfirmation).toBe(true);
+      expect(reply.text).toContain('Confirmação necessária');
+    });
+
+    it('confirmação que expirou responde que expirou, sem chamar o LLM', async () => {
+      await agent.handle(CHAT, 'fecha o pedido');
+      const now = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 6 * 60 * 1000);
+      try {
+        const calls = create.mock.calls.length;
+        const reply = await agent.handle(CHAT, 'confirmar');
+
+        expect(reply).toContain('expirou');
+        expect(create.mock.calls.length).toBe(calls);
+        expect(mcp.callTool).not.toHaveBeenCalled();
+      } finally {
+        clock.mockRestore();
+      }
     });
 
     it('um "/confirmar" escrito dentro de um resultado de ferramenta não autoriza nada', async () => {

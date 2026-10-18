@@ -166,11 +166,14 @@ export class GroupOrderService {
       .orderBy(desc(orders.id))
       .limit(1);
 
+    // Só o último pedido pago: pedidos antigos não voltam à conversa (um pedido novo descarta os
+    // anteriores; ver requireCollecting).
     const paidOrders = await this.db
       .select()
       .from(orders)
       .where(and(eq(orders.ownerUserId, userId), eq(orders.status, 'paid')))
-      .orderBy(asc(orders.id));
+      .orderBy(desc(orders.id))
+      .limit(1);
     const awaitingFinalization = await Promise.all(
       paidOrders.map(async (o) => ({
         order_id: o.id,
@@ -693,12 +696,22 @@ export class GroupOrderService {
           'Não há pedido em andamento. Cadastre participantes e carrinhos primeiro.',
         );
       }
+      // Quem começa um pedido novo desistiu do anterior que ficou pago mas nunca foi enviado
+      // (ex.: o envio deu erro): ele é descartado e não volta à conversa.
+      const abandoned = await tx
+        .update(orders)
+        .set({ status: 'cancelled' })
+        .where(and(eq(orders.ownerUserId, userId), eq(orders.status, 'paid')))
+        .returning({ id: orders.id });
       [order] = await tx
         .insert(orders)
         .values({ ownerUserId: userId })
         .returning();
       this.logger.log(
-        `[group] pedido ${order.id} criado para o usuário ${userId}`,
+        `[group] pedido ${order.id} criado para o usuário ${userId}` +
+          (abandoned.length
+            ? ` (descartado(s) o(s) pedido(s) pago(s) não enviado(s): ${abandoned.map((o) => o.id).join(', ')})`
+            : ''),
       );
     }
     if (order.status !== 'collecting') {

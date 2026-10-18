@@ -53,7 +53,7 @@ const CONFIRM_TTL_MS = 5 * 60 * 1000;
 // frase como "pode confirmar" não conta, e o texto de um resultado de ferramenta nunca chega aqui.
 const CONFIRM_PATTERN = /^\/?confirmar[.!\s]*$/i;
 const NOTHING_PENDING_REPLY =
-  'Não há nenhuma ação aguardando confirmação (ou ela expirou). Peça de novo, por favor.';
+  'A confirmação expirou (o prazo é de 5 minutos). Peça de novo, por favor.';
 
 const FALLBACK_REPLY = 'Desculpe, ocorreu um erro interno. Tente novamente.';
 const BUSY_REPLY =
@@ -73,6 +73,8 @@ export interface AgentReply {
   text: string;
   // Fotos de pratos/lojas escolhidas pelo LLM e validadas pelo código (ver images.ts).
   images: ReplyImage[];
+  // Uma ação sensível ficou esperando o "confirmar" (o Telegram mostra os botões).
+  awaitingConfirmation?: boolean;
 }
 
 // Ação sensível que o LLM pediu e que só roda, com estes argumentos exatos, depois do /confirmar.
@@ -143,7 +145,9 @@ export class AgentService {
       .then(async (): Promise<AgentReply> => {
         const images: ReplyImage[] = [];
         const reply = await this.process(chatId, text, images, profile);
-        return { text: reply, images };
+        // Dentro da fila do chat: nenhuma outra mensagem dele consumiu a ação pendente ainda.
+        const awaitingConfirmation = this.pendingActions.has(chatId);
+        return { text: reply, images, awaitingConfirmation };
       });
     this.queues.set(chatId, next);
     // O .catch é obrigatório: sem ele a promise derivada do finally rejeita sem handler
@@ -186,10 +190,11 @@ export class AgentService {
     if (CONFIRM_PATTERN.test(command)) {
       if (pending && pending.expiresAt >= Date.now()) {
         confirmed = pending;
-      } else if (pending || command.startsWith('/')) {
+      } else if (pending) {
         return NOTHING_PENDING_REPLY;
       }
-      // "confirmar" sem nada pendente e sem barra é conversa normal: segue para o LLM.
+      // Sem nada pendente, "confirmar" vai ao LLM: se ele só tinha perguntado ("posso enviar?"),
+      // agora chama a ferramenta e o sistema pede a confirmação de verdade (com os botões).
     }
 
     const user = await this.users.getOrCreateByTelegram(chatId, profile?.name);
@@ -666,7 +671,7 @@ export class AgentService {
         : '⚠️ **Confirmação necessária**',
       ...(state.pending.summary ? [state.pending.summary] : []),
       '',
-      'Responda **confirmar** em até 5 minutos para seguir. Qualquer outra mensagem cancela.',
+      'Toque em **Confirmar** ou responda **confirmar** em até 5 minutos para seguir. Qualquer outra mensagem cancela.',
     ].join('\n');
   }
 

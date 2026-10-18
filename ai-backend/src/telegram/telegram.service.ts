@@ -12,6 +12,23 @@ import { PaymentsService } from '../payments/payments.service.js';
 import { markdownToTelegramHtml } from './markdown.js';
 import { formatPaymentNotice } from './payment-notice.js';
 
+// Botões do pedido de confirmação. O toque vira a mesma mensagem que a pessoa digitaria, então
+// passa pelas mesmas regras do agente (ação pendente, prazo, uso único).
+export const CONFIRM_DATA = 'confirm';
+export const CANCEL_DATA = 'cancel';
+const CONFIRM_KEYBOARD: TelegramBot.InlineKeyboardMarkup = {
+  inline_keyboard: [
+    [
+      { text: '✅ Confirmar', callback_data: CONFIRM_DATA },
+      { text: '❌ Cancelar', callback_data: CANCEL_DATA },
+    ],
+  ],
+};
+const BUTTON_TEXT: Record<string, { text: string; toast: string }> = {
+  [CONFIRM_DATA]: { text: 'confirmar', toast: 'Confirmado' },
+  [CANCEL_DATA]: { text: 'cancelar', toast: 'Cancelado' },
+};
+
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
@@ -29,6 +46,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     this.bot = new TelegramBot(token, { polling: true });
     this.bot.on('message', (msg) => void this.handleMessage(msg));
+    this.bot.on('callback_query', (query) => void this.handleButton(query));
     this.bot.on('polling_error', (err: Error & { code?: string }) =>
       this.logger.error(
         `[telegram] polling error ${err.code ?? ''}: ${err.message}`,
@@ -65,18 +83,49 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(
       `[telegram] ← chat ${chatId} (@${msg.from?.username ?? '-'}): ${JSON.stringify(msg.text)}`,
     );
+    await this.respond(chatId, msg.text, msg.from);
+  }
 
+  // Toque em ✅/❌: tira os botões (não dá para tocar duas vezes) e segue como se a pessoa tivesse
+  // digitado "confirmar" ou "cancelar".
+  private async handleButton(query: TelegramBot.CallbackQuery): Promise<void> {
+    const button = query.data ? BUTTON_TEXT[query.data] : undefined;
+    const message = query.message;
+    await this.bot
+      .answerCallbackQuery(query.id, button ? { text: button.toast } : {})
+      .catch(() => undefined);
+    if (!button || !message) return;
+    const chatId = message.chat.id;
+    this.logger.log(
+      `[telegram] ← chat ${chatId} (@${query.from.username ?? '-'}): botão ${JSON.stringify(query.data)}`,
+    );
+    await this.bot
+      .editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        { chat_id: chatId, message_id: message.message_id },
+      )
+      .catch(() => undefined);
+    await this.respond(chatId, button.text, query.from);
+  }
+
+  private async respond(
+    chatId: number,
+    text: string,
+    from?: TelegramBot.User,
+  ): Promise<void> {
     try {
       // "digitando..." é só cosmético: se falhar, segue o fluxo.
       await this.withRetry('sendChatAction', () =>
         this.bot.sendChatAction(chatId, 'typing'),
       ).catch(() => undefined);
       const name =
-        [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') ||
-        msg.from?.username;
-      const reply = await this.agent.handleRich(chatId, msg.text, { name });
+        [from?.first_name, from?.last_name].filter(Boolean).join(' ') ||
+        from?.username;
+      const reply = await this.agent.handleRich(chatId, text, { name });
       await this.sendPhotos(chatId, reply.images);
-      await this.sendMessage(chatId, reply.text);
+      await this.sendMessage(chatId, reply.text, {
+        confirmButtons: reply.awaitingConfirmation,
+      });
     } catch (err) {
       this.logger.error(
         `Falha ao processar mensagem do chat ${chatId}: ${String(err)}`,
@@ -89,15 +138,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async sendMessage(chatId: number, text: string): Promise<void> {
+  async sendMessage(
+    chatId: number,
+    text: string,
+    options: { confirmButtons?: boolean } = {},
+  ): Promise<void> {
     this.logger.log(
       `[telegram] → chat ${chatId}: ${JSON.stringify(text.length > 200 ? `${text.slice(0, 200)}…` : text)}`,
     );
-    for (const chunk of splitByLines(text, CHUNK_SIZE)) {
+    const chunks = splitByLines(text, CHUNK_SIZE);
+    for (const [index, chunk] of chunks.entries()) {
+      // Os botões vão na última parte, logo abaixo do "Responda confirmar...".
+      const markup =
+        options.confirmButtons && index === chunks.length - 1
+          ? { reply_markup: CONFIRM_KEYBOARD }
+          : {};
       try {
         await this.withRetry('sendMessage', () =>
           this.bot.sendMessage(chatId, markdownToTelegramHtml(chunk), {
             parse_mode: 'HTML',
+            ...markup,
           }),
         );
       } catch (err) {
@@ -108,7 +168,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           `[telegram] HTML recusado para chat ${chatId}, reenviando sem formatação: ${String(err)}`,
         );
         await this.withRetry('sendMessage', () =>
-          this.bot.sendMessage(chatId, chunk),
+          this.bot.sendMessage(chatId, chunk, markup),
         );
       }
     }
