@@ -13,9 +13,24 @@ export class TurnTranscript {
     this.start = messages.length;
   }
 
-  // Índice da mensagem do usuário que abriu o turno.
-  get userIndex(): number {
-    return this.start - 1;
+  // A mensagem do usuário que abriu o turno.
+  get userMessage(): MessageParam {
+    return this.messages[this.start - 1];
+  }
+
+  // O estado do pedido entra na mensagem do usuário e fica no histórico com ela: os próximos
+  // turnos recebem exatamente o mesmo texto (o prefixo do cache se mantém).
+  attachToUserMessage(text: string): void {
+    const target = this.messages[this.start - 1];
+    if (!text || target?.role !== 'user') return;
+    const content =
+      typeof target.content === 'string'
+        ? [{ type: 'text' as const, text: target.content }]
+        : target.content;
+    this.messages[this.start - 1] = {
+      ...target,
+      content: [...content, { type: 'text', text }],
+    };
   }
 
   push(message: MessageParam): void {

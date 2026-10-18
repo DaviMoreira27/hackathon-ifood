@@ -1,4 +1,8 @@
-import type { Message, NewMessage } from '../src/messages/messages.service.js';
+import {
+  type Message,
+  type NewMessage,
+  windowStart,
+} from '../src/messages/messages.service.js';
 import type { SavedRestriction } from '../src/dietary/dietary.check.js';
 import type { NewRestriction } from '../src/dietary/dietary.service.js';
 import { GroupOrderError } from '../src/group-order/group-order.errors.js';
@@ -17,22 +21,46 @@ import type { NewTurnTrace } from '../src/agent/turn-traces.service.js';
 
 export class MemoryMessages {
   rows: Message[] = [];
+  facts = new Map<number, { ids: Set<string>; cents: Set<number> }>();
   add = async (row: NewMessage) => {
+    const id = this.rows.length + 1;
     this.rows.push({
-      id: this.rows.length + 1,
+      id,
       userId: null,
       payload: null,
       createdAt: new Date(),
       ...row,
     } as Message);
+    return id;
   };
+
   addMany = async (rows: NewMessage[]) => {
     for (const row of rows) await this.add(row);
   };
-  recent = async (chatId: number, limit: number) =>
-    this.rows.filter((r) => r.chatId === chatId).slice(-limit);
+  setPayload = async (id: number, payload: unknown) => {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.payload = payload;
+  };
+  recent = async (chatId: number, limit: number, step = 1) => {
+    const rows = this.rows.filter((r) => r.chatId === chatId);
+    return rows.slice(windowStart(rows.length, limit, step));
+  };
+  seenFacts = async (chatId: number) => {
+    const f = this.facts.get(chatId);
+    return { ids: [...(f?.ids ?? [])], cents: [...(f?.cents ?? [])] };
+  };
+  rememberFacts = async (
+    chatId: number,
+    seen: { ids: string[]; cents: number[] },
+  ) => {
+    const f = this.facts.get(chatId) ?? { ids: new Set(), cents: new Set() };
+    seen.ids.forEach((i) => f.ids.add(i));
+    seen.cents.forEach((c) => f.cents.add(c));
+    this.facts.set(chatId, f);
+  };
   clearChat = async (chatId: number) => {
     this.rows = this.rows.filter((r) => r.chatId !== chatId);
+    this.facts.delete(chatId);
   };
 }
 

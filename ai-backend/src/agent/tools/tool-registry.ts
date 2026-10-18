@@ -13,12 +13,12 @@ export class ToolRegistry {
     private readonly groupTools: GroupOrderTools,
   ) {}
 
-  // Ferramentas do iFood + as do pedido em grupo; o checkout só aparece com o pedido pago.
-  // As locais vão com strict: os argumentos sempre respeitam o schema.
-  definitions(ctx: TurnContext, checkoutAllowed: boolean): Tool[] {
+  // Ferramentas do iFood + as do pedido em grupo. As locais vão com strict: os argumentos sempre
+  // respeitam o schema.
+  definitions(ctx: TurnContext): Tool[] {
     return [
       ...this.groupTools
-        .mergeTools(ctx.session.tools, checkoutAllowed)
+        .mergeTools(ctx.session.tools)
         .map((t) => (this.groupTools.has(t.name) ? strictTool(t) : t)),
       ...PRICE_TOOLS.map(strictTool),
       ...DIET_TOOLS.map(strictTool),

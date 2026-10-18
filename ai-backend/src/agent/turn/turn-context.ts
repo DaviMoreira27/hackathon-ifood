@@ -29,9 +29,8 @@ export class TurnContext {
   readonly facts = new FactCorpus();
 
   private mcpSession?: McpSession;
-  // Conversa viva (histórico + turno) e o estado do pedido injetado: base dos validadores.
+  // Conversa viva (histórico + turno).
   private conversation: MessageParam[] = [];
-  private state = '';
   private pending?: PendingAction;
   // Textos que as ferramentas locais mandam anexar à resposta (links de pagamento): saem do
   // código, não passam pelo LLM, que poderia estragá-los.
@@ -55,11 +54,19 @@ export class TurnContext {
     this.tool = { chatId: user.chatId, userId: user.userId };
   }
 
-  // Chamado quando a sessão do MCP e o histórico já estão em mãos.
-  begin(session: McpSession, messages: MessageParam[]): void {
+  // Chamado quando a sessão do MCP, o histórico e o registro de fatos do chat já estão em mãos.
+  // A última mensagem do histórico é a do usuário que abriu o turno: ela já conta como nova.
+  begin(
+    session: McpSession,
+    messages: MessageParam[],
+    seen: { ids: string[]; cents: number[] } = { ids: [], cents: [] },
+  ): void {
     this.mcpSession = session;
     this.conversation = messages;
-    this.facts.add(...factTexts(messages));
+    this.facts.remember(seen);
+    this.facts.add(...factTexts(messages.slice(0, -1)));
+    this.facts.markFresh();
+    this.facts.add(...factTexts(messages.slice(-1)));
   }
 
   get session(): McpSession {
@@ -69,15 +76,6 @@ export class TurnContext {
 
   get messages(): MessageParam[] {
     return this.conversation;
-  }
-
-  get stateBlock(): string {
-    return this.state;
-  }
-
-  setStateBlock(block: string): void {
-    this.state = block;
-    this.facts.add(block);
   }
 
   orderView(): Promise<OrderView> {

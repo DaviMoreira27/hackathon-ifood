@@ -126,6 +126,48 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
     expect(last2.map((m) => m.content)).toEqual(['r', 'fim']);
   });
 
+  it('mensagens: janela em saltos e payload gravado depois', async () => {
+    const rows = (await messagesService.recent(CHAT, 1000)).length;
+    const id = await messagesService.add({
+      chatId: CHAT,
+      role: 'user',
+      content: 'com estado',
+    });
+    await messagesService.setPayload(id, [{ type: 'text', text: 'estado' }]);
+
+    const all = await messagesService.recent(CHAT, 1000);
+    expect(all.at(-1)).toMatchObject({
+      id,
+      payload: [{ type: 'text', text: 'estado' }],
+    });
+    const total = rows + 1;
+    const windowed = await messagesService.recent(CHAT, 2, 3);
+    expect(windowed).toHaveLength(total - Math.floor((total - 2) / 3) * 3);
+  });
+
+  it('registro de fatos: grava sem duplicar, lê por chat e some com a conversa', async () => {
+    await messagesService.rememberFacts(CHAT, {
+      ids: ['a1', 'b2'],
+      cents: [990],
+    });
+    await messagesService.rememberFacts(CHAT, { ids: ['a1'], cents: [990, 5] });
+    await messagesService.rememberFacts(CHAT + 1, {
+      ids: ['outro'],
+      cents: [],
+    });
+
+    const seen = await messagesService.seenFacts(CHAT);
+    expect(seen.ids.sort()).toEqual(['a1', 'b2']);
+    expect(seen.cents.sort((a, b) => a - b)).toEqual([5, 990]);
+
+    await messagesService.clearChat(CHAT);
+    expect(await messagesService.seenFacts(CHAT)).toEqual({
+      ids: [],
+      cents: [],
+    });
+    expect((await messagesService.seenFacts(CHAT + 1)).ids).toEqual(['outro']);
+  });
+
   it('addMany é tudo ou nada', async () => {
     const before = (await messagesService.recent(CHAT, 100)).length;
 

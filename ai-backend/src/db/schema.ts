@@ -107,6 +107,23 @@ export const messages = pgTable('messages', {
     .defaultNow(),
 });
 
+// Ids e valores (em centavos) que já apareceram em resultados de ferramentas do chat. Os
+// validadores aceitam o que está aqui mesmo depois que o resultado saiu da janela de histórico.
+export const chatFacts = pgTable(
+  'chat_facts',
+  {
+    chatId: bigint('chat_id', { mode: 'number' })
+      .notNull()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['id', 'cents'] }).notNull(),
+    value: text('value').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.chatId, t.kind, t.value] })],
+);
+
 // O DDL de verdade está em db/init.sql: aqui ficam só os tipos para as queries.
 
 export const participants = pgTable('participants', {

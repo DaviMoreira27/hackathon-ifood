@@ -2,10 +2,11 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { Mock } from 'vitest';
 import type { AuthService } from '../auth/auth.service.js';
 import { McpUnauthorizedError, type McpService } from '../mcp/mcp.service.js';
-import type {
-  Message,
-  MessagesService,
-  NewMessage,
+import {
+  type Message,
+  type MessagesService,
+  type NewMessage,
+  windowStart,
 } from '../messages/messages.service.js';
 import type { GroupOrderTools } from '../group-order/group-order.tools.js';
 import type { DietaryTools } from '../dietary/dietary.tools.js';
@@ -19,22 +20,45 @@ import { wrapToolResult } from './tool-envelope.js';
 // MessagesService em memória, com a mesma semântica de ordem/janela do real.
 class FakeMessages {
   rows: Message[] = [];
+  facts = new Map<number, { ids: Set<string>; cents: Set<number> }>();
   add = async (row: NewMessage) => {
+    const id = this.rows.length + 1;
     this.rows.push({
-      id: this.rows.length + 1,
+      id,
       userId: null,
       payload: null,
       createdAt: new Date(),
       ...row,
     } as Message);
+    return id;
   };
   addMany = async (rows: NewMessage[]) => {
     for (const row of rows) await this.add(row);
   };
-  recent = async (chatId: number, limit: number) =>
-    this.rows.filter((r) => r.chatId === chatId).slice(-limit);
+  setPayload = async (id: number, payload: unknown) => {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.payload = payload;
+  };
+  recent = async (chatId: number, limit: number, step = 1) => {
+    const rows = this.rows.filter((r) => r.chatId === chatId);
+    return rows.slice(windowStart(rows.length, limit, step));
+  };
+  seenFacts = async (chatId: number) => {
+    const f = this.facts.get(chatId);
+    return { ids: [...(f?.ids ?? [])], cents: [...(f?.cents ?? [])] };
+  };
+  rememberFacts = async (
+    chatId: number,
+    seen: { ids: string[]; cents: number[] },
+  ) => {
+    const f = this.facts.get(chatId) ?? { ids: new Set(), cents: new Set() };
+    seen.ids.forEach((i) => f.ids.add(i));
+    seen.cents.forEach((c) => f.cents.add(c));
+    this.facts.set(chatId, f);
+  };
   clearChat = async (chatId: number) => {
     this.rows = this.rows.filter((r) => r.chatId !== chatId);
+    this.facts.delete(chatId);
   };
 }
 
@@ -133,7 +157,6 @@ describe('AgentService', () => {
         ...mcpTools,
         { name: 'group_x' },
       ]),
-      checkoutAllowed: vi.fn().mockResolvedValue(false),
       checkMcpCall: vi.fn().mockResolvedValue(null),
       execute: vi.fn(),
       prepare: vi.fn().mockResolvedValue({ kind: 'run' }),
@@ -284,15 +307,13 @@ describe('AgentService', () => {
     expect(db.rows.some((r) => r.chatId === 99)).toBe(true);
   });
   describe('ferramentas do pedido em grupo', () => {
-    it('envia ao LLM as ferramentas do iFood mais as locais, e informa se o checkout está liberado', async () => {
+    it('envia ao LLM as ferramentas do iFood mais as locais', async () => {
       session.tools = [{ name: 'search' }] as never;
-      groupTools.checkoutAllowed.mockResolvedValue(true);
       create.mockResolvedValue(textReply('ok'));
 
       await agent.handle(CHAT, 'oi');
 
-      expect(groupTools.checkoutAllowed).toHaveBeenCalledWith(7);
-      expect(groupTools.mergeTools).toHaveBeenCalledWith(session.tools, true);
+      expect(groupTools.mergeTools).toHaveBeenCalledWith(session.tools);
       // + compare_prices e diet_* (locais); a última ferramenta carrega o breakpoint do prompt caching.
       const tools = (create.mock.calls[0][0] as { tools: any[] }).tools;
       expect(tools.map((t) => t.name)).toEqual([
@@ -988,6 +1009,51 @@ describe('AgentService', () => {
         is_error: true,
         content: expect.stringContaining('cartId=inventado'),
       });
+    });
+
+    it('id visto num turno que já saiu do contexto continua valendo (registro do chat)', async () => {
+      session.tools.push({ name: 'getItem' }, { name: 'checkout_cart' });
+      mcp.callTool.mockResolvedValue({
+        text: '{"cartId":"velho9"}',
+        isError: false,
+      });
+      create
+        .mockResolvedValueOnce(toolUseReply('g1', 'getItem', {}))
+        .mockResolvedValueOnce(textReply('achei'))
+        .mockResolvedValueOnce(textReply('ok 2'))
+        .mockResolvedValueOnce(textReply('ok 3'))
+        .mockResolvedValueOnce(textReply('ok 4'))
+        .mockResolvedValueOnce(
+          toolUseReply('w1', 'checkout_cart', { cartId: 'velho9' }),
+        )
+        .mockResolvedValueOnce(textReply('feito'));
+
+      for (const text of ['busca', 'dois', 'três', 'quatro', 'fecha']) {
+        await agent.handle(CHAT, text);
+      }
+
+      const lastContext = JSON.stringify(sent[5]);
+      expect(lastContext).not.toContain('tool_result');
+      expect(mcp.callTool).toHaveBeenLastCalledWith(session, 'checkout_cart', {
+        cartId: 'velho9',
+      });
+    });
+
+    it('o estado do pedido fica gravado junto da mensagem do usuário', async () => {
+      create.mockResolvedValue(textReply('oi'));
+
+      await agent.handle(CHAT, 'primeira');
+      await agent.handle(CHAT, 'segunda');
+
+      const first = db.rows.find((r) => r.content === 'primeira')!;
+      expect(JSON.stringify(first.payload)).toContain('estado_do_pedido');
+      // O segundo turno reenvia a primeira mensagem exatamente como foi no primeiro (fora o
+      // breakpoint do cache, que fica sempre na última mensagem).
+      const withoutCache = (m: unknown) =>
+        JSON.parse(
+          JSON.stringify(m).replace(/,"cache_control":\{[^}]*\}/g, ''),
+        );
+      expect(withoutCache(sent[1][0])).toEqual(withoutCache(sent[0][0]));
     });
 
     it('grava o trace do turno com ferramentas, rodadas e tokens', async () => {

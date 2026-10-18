@@ -17,8 +17,11 @@ export interface AgentConfig {
   maxToolRounds: number;
   // Quantas linhas da tabela messages entram no contexto do LLM.
   historyRows: number;
-  // Resultados de ferramentas de mensagens anteriores entram encurtados no contexto.
+  // Resultados de ferramentas são gravados encurtados no histórico.
   historyToolResultChars: number;
+  // Só os últimos N turnos voltam ao contexto com tool_use e tool_result; dos anteriores fica o
+  // texto das respostas.
+  historyToolTurns: number;
 }
 
 export const DEFAULT_AGENT_CONFIG: Readonly<AgentConfig> = Object.freeze({
@@ -28,13 +31,18 @@ export const DEFAULT_AGENT_CONFIG: Readonly<AgentConfig> = Object.freeze({
   maxToolRounds: 6,
   historyRows: 20,
   historyToolResultChars: 2000,
+  historyToolTurns: 3,
 });
 
 // Acima de ~21 mil tokens o SDK recusa requisições sem streaming (o tempo esperado passa de 10 min).
 const MAX_NON_STREAMING_TOKENS = 21000;
 
 const INT_LIMITS: Record<
-  'maxTokens' | 'maxToolRounds' | 'historyRows' | 'historyToolResultChars',
+  | 'maxTokens'
+  | 'maxToolRounds'
+  | 'historyRows'
+  | 'historyToolResultChars'
+  | 'historyToolTurns',
   { env: string; min: number; max: number }
 > = {
   maxTokens: {
@@ -49,6 +57,7 @@ const INT_LIMITS: Record<
     min: 500,
     max: 20000,
   },
+  historyToolTurns: { env: 'AGENT_HISTORY_TOOL_TURNS', min: 1, max: 50 },
 };
 
 const read = (env: NodeJS.ProcessEnv, key: string) => {

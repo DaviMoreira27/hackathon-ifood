@@ -250,17 +250,16 @@ export class GroupOrderTools {
     return TOOL_NAMES.has(name);
   }
 
-  // Ferramentas do iFood + as locais. As locais vencem em caso de nome repetido, e as de
-  // checkout ficam escondidas do modelo enquanto não houver pedido totalmente pago.
-  mergeTools(mcpTools: Tool[], checkoutAllowed: boolean): Tool[] {
+  // Ferramentas do iFood + as locais. As locais vencem em caso de nome repetido. O checkout fica
+  // sempre na lista (a lista não muda quando o pedido é pago, e o prefixo do cache se mantém): a
+  // trava de verdade é checkMcpCall, no momento da chamada.
+  mergeTools(mcpTools: Tool[]): Tool[] {
     const visible = mcpTools.filter((tool) => {
-      if (TOOL_NAMES.has(tool.name)) {
-        this.logger.warn(
-          `Ferramenta do MCP "${tool.name}" ignorada: nome reservado pelo pedido em grupo`,
-        );
-        return false;
-      }
-      return checkoutAllowed || !this.isCheckoutTool(tool.name);
+      if (!TOOL_NAMES.has(tool.name)) return true;
+      this.logger.warn(
+        `Ferramenta do MCP "${tool.name}" ignorada: nome reservado pelo pedido em grupo`,
+      );
+      return false;
     });
     return [...visible, ...this.definitions];
   }
@@ -310,10 +309,6 @@ export class GroupOrderTools {
 
   orderView(ctx: ToolContext): Promise<OrderView> {
     return this.orders.getOrderView(ctx.userId);
-  }
-
-  checkoutAllowed(userId: number): Promise<boolean> {
-    return this.orders.hasPaidOrder(userId);
   }
 
   isCheckoutTool(name: string): boolean {

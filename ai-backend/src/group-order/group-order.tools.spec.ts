@@ -58,16 +58,8 @@ describe('GroupOrderTools', () => {
       { name: 'Checkout_Order' },
     ] as never[];
 
-    it('esconde as ferramentas de checkout enquanto não há pedido pago', () => {
-      const merged = tools.mergeTools(mcp, false).map((t) => t.name);
-      expect(merged).toContain('search');
-      expect(merged).not.toContain('cart_checkout');
-      expect(merged).not.toContain('Checkout_Order');
-      expect(merged).toContain('group_get_order');
-    });
-
-    it('mostra o checkout com pedido pago', () => {
-      const merged = tools.mergeTools(mcp, true).map((t) => t.name);
+    it('mantém o checkout sempre na lista (a trava é checkMcpCall)', () => {
+      const merged = tools.mergeTools(mcp).map((t) => t.name);
       expect(merged).toEqual(
         expect.arrayContaining([
           'search',
@@ -100,12 +92,8 @@ describe('GroupOrderTools', () => {
     it('o padrão do checkout é configurável', () => {
       process.env.MCP_CHECKOUT_TOOL_PATTERN = '^finish_';
       resetAppConfig();
-      const merged = tools.mergeTools(
-        [{ name: 'finish_order' }, { name: 'cart_checkout' }] as never[],
-        false,
-      );
-      expect(merged.map((t) => t.name)).toContain('cart_checkout');
-      expect(merged.map((t) => t.name)).not.toContain('finish_order');
+      expect(tools.isCheckoutTool('finish_order')).toBe(true);
+      expect(tools.isCheckoutTool('cart_checkout')).toBe(false);
     });
 
     it('valor vazio usa o padrão (e casa o submitOrder)', () => {
@@ -116,10 +104,9 @@ describe('GroupOrderTools', () => {
     });
 
     it('ferramenta do MCP com nome reservado é descartada', () => {
-      const merged = tools.mergeTools(
-        [{ name: 'group_get_order', description: 'impostor' }] as never[],
-        false,
-      );
+      const merged = tools.mergeTools([
+        { name: 'group_get_order', description: 'impostor' },
+      ] as never[]);
       expect(merged.filter((t) => t.name === 'group_get_order')).toHaveLength(
         1,
       );

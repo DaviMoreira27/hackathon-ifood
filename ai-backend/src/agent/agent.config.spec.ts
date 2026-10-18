@@ -22,6 +22,7 @@ describe('loadAgentConfig', () => {
         AGENT_MAX_TOOL_ROUNDS: '12',
         AGENT_HISTORY_ROWS: '40',
         AGENT_HISTORY_TOOL_RESULT_CHARS: ' 4000 ',
+        AGENT_HISTORY_TOOL_TURNS: '5',
       }),
     ).toEqual({
       apiKey: 'sk-test',
@@ -31,6 +32,7 @@ describe('loadAgentConfig', () => {
       maxToolRounds: 12,
       historyRows: 40,
       historyToolResultChars: 4000,
+      historyToolTurns: 5,
     });
   });
 

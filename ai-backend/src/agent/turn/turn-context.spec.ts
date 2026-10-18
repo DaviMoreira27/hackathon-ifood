@@ -46,12 +46,35 @@ describe('TurnContext', () => {
   it('o corpus de fatos cresce com o estado e com o que for adicionado', () => {
     const ctx = new TurnContext({ chatId: 1, userId: 2 }, vi.fn());
     ctx.begin({} as never, [{ role: 'user', content: 'quero a c1' }]);
-    ctx.setStateBlock('Estado: total R$ 47,90');
+    ctx.facts.add('Estado: total R$ 47,90');
     ctx.facts.add('{"itemId":"i9","unitPrice":12.5}');
 
     expect(ctx.facts.text).toContain('quero a c1');
     expect(ctx.facts.text).toContain('i9');
     expect(ctx.facts.knownCents().has(4790)).toBe(true);
     expect(ctx.facts.knownCents().has(1250)).toBe(true);
+  });
+
+  it('aceita ids e valores do registro do chat e grava só o que é novo no turno', () => {
+    const ctx = new TurnContext({ chatId: 1, userId: 2 }, vi.fn());
+    ctx.begin(
+      {} as never,
+      [
+        { role: 'user', content: 'oi' },
+        { role: 'assistant', content: 'olá' },
+        { role: 'user', content: 'adiciona' },
+      ],
+      { ids: ['velho1'], cents: [990] },
+    );
+    ctx.facts.add('{"cartId":"c7","total":19.9} cartItemId ci3;');
+
+    expect(ctx.facts.hasId('velho1')).toBe(true);
+    expect(ctx.facts.hasId('c7')).toBe(true);
+    expect(ctx.facts.hasId('nunca')).toBe(false);
+    expect(ctx.facts.knownCents().has(990)).toBe(true);
+    const fresh = ctx.facts.freshFacts();
+    expect(fresh.ids).toEqual(expect.arrayContaining(['c7', 'ci3']));
+    expect(fresh.ids).not.toContain('velho1');
+    expect(fresh.cents).toContain(1990);
   });
 });

@@ -4,7 +4,6 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type {
   Message,
   MessageCreateParamsNonStreaming,
-  MessageParam,
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/messages.js';
 import { policyFor, type DietaryTools } from '../../dietary/dietary.tools.js';
@@ -46,6 +45,9 @@ export interface TurnInput {
   userId: number;
   ownerName?: string;
   token: string;
+  // A mensagem do usuário que abriu o turno, já gravada pela fachada (o estado do pedido é gravado
+  // junto dela).
+  userMessageId?: number;
   // Ação aprovada pelo /confirmar: roda antes do LLM, exatamente como o usuário viu.
   confirmed?: PendingAction;
   // Etapa atual ("Buscando ofertas..."), a cada lote de ferramentas. Só informativo: falhas do
@@ -73,27 +75,6 @@ export interface TurnDeps {
 interface StopDetails {
   category?: string | null;
   explanation?: string | null;
-}
-
-// Cópia das mensagens com o estado do pedido anexado à mensagem do usuário que abriu o turno. Só vai
-// para a API: o histórico gravado não acumula estados antigos.
-function withState(
-  messages: MessageParam[],
-  index: number,
-  block: string,
-): MessageParam[] {
-  const target = messages[index];
-  if (!block || target?.role !== 'user') return messages;
-  const content =
-    typeof target.content === 'string'
-      ? [{ type: 'text' as const, text: target.content }]
-      : target.content;
-  const copy = [...messages];
-  copy[index] = {
-    ...target,
-    content: [...content, { type: 'text', text: block }],
-  };
-  return copy;
 }
 
 // O loop do LLM de um turno: monta a requisição, executa as ferramentas pedidas e para na resposta
@@ -149,7 +130,12 @@ export class TurnRunner {
     const saveTurn = async () => {
       if (!transcript) return;
       transcript.saved = true;
-      await store.saveTurn(chatId, userId, transcript.turn());
+      await store.saveTurn(chatId, userId, {
+        userMessageId: input.userMessageId,
+        userMessage: transcript.userMessage,
+        messages: transcript.turn(),
+        facts: ctx.facts.freshFacts(),
+      });
     };
     const done = (text: string, images: ReplyImage[] = []): TurnResult => ({
       text: this.finalizer.withConfirmation(text, ctx.pendingAction),
@@ -179,21 +165,19 @@ export class TurnRunner {
 
     try {
       // Nada aqui depende de outra leitura: sessão do MCP, histórico, pedido e dieta saem juntos.
-      const [session, history, state, checkoutAllowed, restrictions] =
-        await Promise.all([
-          mcp.getSession(chatId, input.token),
-          // Já inclui a mensagem do usuário gravada pela fachada.
-          store.recent(chatId),
-          this.stateBlock(ctx),
-          groupTools.checkoutAllowed(userId),
-          dietTools.list(userId),
-        ]);
+      const [session, history, seen, state, restrictions] = await Promise.all([
+        mcp.getSession(chatId, input.token),
+        // Já inclui a mensagem do usuário gravada pela fachada.
+        store.recent(chatId),
+        store.seenFacts(chatId),
+        this.stateBlock(ctx),
+        dietTools.list(userId),
+      ]);
       transcript = new TurnTranscript(history);
-      ctx.begin(session, transcript.messages);
-      ctx.setStateBlock(state);
-      const tools = cachedTools(
-        this.registry.definitions(ctx, checkoutAllowed),
-      );
+      ctx.begin(session, transcript.messages, seen);
+      transcript.attachToUserMessage(state);
+      ctx.facts.add(state);
+      const tools = cachedTools(this.registry.definitions(ctx));
       // Política de restrição alimentar: só entra no prompt de quem declarou uma restrição.
       let dietPolicy = policyFor(restrictions);
       let retried = false;
@@ -231,13 +215,7 @@ export class TurnRunner {
           output_config: { effort: config.effort },
           system: cachedSystem(SYSTEM_PROMPT, dietPolicy),
           tools,
-          messages: cachedMessages(
-            withState(
-              transcript.messages,
-              transcript.userIndex,
-              ctx.stateBlock,
-            ),
-          ),
+          messages: cachedMessages(transcript.messages),
         };
         const response: Message = await anthropic.messages.create(
           params as MessageCreateParamsNonStreaming,

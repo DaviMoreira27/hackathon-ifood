@@ -50,6 +50,16 @@ CREATE TABLE messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Ids e valores (centavos) já vistos em resultados de ferramentas do chat: os validadores aceitam
+-- o que está aqui mesmo depois que o resultado saiu da janela de histórico.
+CREATE TABLE chat_facts (
+  chat_id    BIGINT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL CHECK (kind IN ('id', 'cents')),
+  value      TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (chat_id, kind, value)
+);
+
 -- Quem participa do pedido (só um nome: a pessoa não precisa ter conta nem estar no chat).
 CREATE TABLE participants (
   id         BIGSERIAL PRIMARY KEY,

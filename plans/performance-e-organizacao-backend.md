@@ -232,20 +232,24 @@ Cada passo é um PR/commit que mantém os specs verdes.
 
 ### Fase 3 — tokens e cache (medir com o eval a cada passo)
 
-- [ ] 3.1 Prompt: reforçar que chamadas independentes saem juntas na mesma resposta; rodar o eval
+Implementada em 2026-10-18 sem rodar o eval (exige a API de verdade): a comparação de
+`AGENT_EFFORT`, o efeito do checkout visível e o `cache_read_tokens` da primeira rodada ainda
+precisam ser medidos com `npm run eval` e `agent_turns`.
+
+- [x] 3.1 Prompt: reforçar que chamadas independentes saem juntas na mesma resposta; rodar o eval
       com `AGENT_EFFORT=low` × `medium` e comparar `rounds`, `duration_ms` e as métricas do eval.
-- [ ] 3.2 Ferramentas sempre na mesma lista: manter o checkout visível (a trava real é o
+- [x] 3.2 Ferramentas sempre na mesma lista: manter o checkout visível (a trava real é o
       `CheckoutGate`) para o prefixo de ferramentas não mudar quando o pedido é pago. Decidir com
       o eval se o modelo passa a tentar o checkout cedo demais.
-- [ ] 3.3 Histórico estável entre mensagens:
+- [x] 3.3 Histórico estável entre mensagens:
       - janela andando em saltos (cortar em múltiplos de 20 linhas) em vez de uma linha por vez;
       - encurtar tool_result ao gravar, não ao remontar (mesmo conteúdo em todos os turnos);
       - estado do pedido como texto que fica no histórico, em vez de anexado e removido.
       Conferir `cache_read_tokens` da primeira rodada em `agent_turns`.
-- [ ] 3.4 Registro de ids e valores vistos persistido por chat (tabela nova), alimentado pelo
+- [x] 3.4 Registro de ids e valores vistos persistido por chat (tabela nova), alimentado pelo
       `TurnContext` no fim do turno. Pré-requisito do 3.5: hoje `UnseenIdsGate` e o validador de
       valores dependem dos tool_result antigos estarem no histórico.
-- [ ] 3.5 Descartar tool_result de turnos mais antigos que os últimos 2 ou 3 (fica o texto do
+- [x] 3.5 Descartar tool_result de turnos mais antigos que os últimos 2 ou 3 (fica o texto do
       assistant; o estado do pedido carrega carrinhos, itens e ids).
 
 ### Fase 4 — quebrar os arquivos grandes de produção

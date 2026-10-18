@@ -143,7 +143,7 @@ export class AgentService {
     }
 
     const user = await this.users.getOrCreateByChat(chatId, profile?.name);
-    const [, token] = await Promise.all([
+    const [userMessageId, token] = await Promise.all([
       this.store.addText(chatId, user.id, 'user', text),
       this.auth.getValidAccessToken(chatId, user),
     ]);
@@ -158,6 +158,7 @@ export class AgentService {
         userId: user.id,
         ownerName: profile?.name,
         token,
+        userMessageId,
         confirmed,
         onProgress: options.onProgress,
       });

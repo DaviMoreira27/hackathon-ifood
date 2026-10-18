@@ -3,10 +3,11 @@ import type { AuthService } from '../auth/auth.service.js';
 import type { GroupOrderTools } from '../group-order/group-order.tools.js';
 import type { DietaryTools } from '../dietary/dietary.tools.js';
 import type { McpService } from '../mcp/mcp.service.js';
-import type {
-  Message,
-  MessagesService,
-  NewMessage,
+import {
+  type Message,
+  type MessagesService,
+  type NewMessage,
+  windowStart,
 } from '../messages/messages.service.js';
 import type { UsersService } from '../users/users.service.js';
 import { DEFAULT_AGENT_CONFIG } from './agent.config.js';
@@ -17,22 +18,45 @@ import type { TurnTracesService } from './turn-traces.service.js';
 
 class FakeMessages {
   rows: Message[] = [];
+  facts = new Map<number, { ids: Set<string>; cents: Set<number> }>();
   add = async (row: NewMessage) => {
+    const id = this.rows.length + 1;
     this.rows.push({
-      id: this.rows.length + 1,
+      id,
       userId: null,
       payload: null,
       createdAt: new Date(),
       ...row,
     } as Message);
+    return id;
   };
   addMany = async (rows: NewMessage[]) => {
     for (const row of rows) await this.add(row);
   };
-  recent = async (chatId: number, limit: number) =>
-    this.rows.filter((r) => r.chatId === chatId).slice(-limit);
+  setPayload = async (id: number, payload: unknown) => {
+    const row = this.rows.find((r) => r.id === id);
+    if (row) row.payload = payload;
+  };
+  recent = async (chatId: number, limit: number, step = 1) => {
+    const rows = this.rows.filter((r) => r.chatId === chatId);
+    return rows.slice(windowStart(rows.length, limit, step));
+  };
+  seenFacts = async (chatId: number) => {
+    const f = this.facts.get(chatId);
+    return { ids: [...(f?.ids ?? [])], cents: [...(f?.cents ?? [])] };
+  };
+  rememberFacts = async (
+    chatId: number,
+    seen: { ids: string[]; cents: number[] },
+  ) => {
+    const f = this.facts.get(chatId) ?? { ids: new Set(), cents: new Set() };
+    seen.ids.forEach((i) => f.ids.add(i));
+    seen.cents.forEach((c) => f.cents.add(c));
+    this.facts.set(chatId, f);
+  };
   clearChat = async (chatId: number) => {
     this.rows = this.rows.filter((r) => r.chatId !== chatId);
+    this.facts.delete(chatId);
   };
 }
 
@@ -83,7 +107,6 @@ describe('AgentService — segurança', () => {
     const groupTools = {
       has: () => false,
       mergeTools: (tools: unknown[]) => tools,
-      checkoutAllowed: vi.fn().mockResolvedValue(true),
       checkMcpCall: vi.fn().mockResolvedValue(null),
       // O carrinho c1 está no estado do pedido injetado a cada turno: é um id "visto".
       orderView: vi.fn().mockResolvedValue({

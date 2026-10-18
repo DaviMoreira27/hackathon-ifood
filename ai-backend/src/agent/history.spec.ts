@@ -1,5 +1,10 @@
 import type { Message } from '../messages/messages.service.js';
-import { messagesToRows, rowsToMessages } from './history.js';
+import {
+  messagesToRows,
+  rowsToMessages,
+  shrinkToolResults,
+} from './history.js';
+import { windowStart } from '../messages/messages.service.js';
 
 const row = (
   id: number,
@@ -144,5 +149,73 @@ describe('messagesToRows', () => {
         payload: null,
       },
     ]);
+  });
+});
+
+describe('rowsToMessages — turnos antigos sem ferramentas', () => {
+  const turn = (base: number, n: number) => [
+    row(base, 'user', `pergunta ${n}`),
+    row(base + 1, 'assistant', 'vou ver', [
+      { type: 'text', text: 'vou ver' },
+      { type: 'tool_use', id: `t${n}`, name: 'search', input: {} },
+    ]),
+    row(base + 2, 'tool', 'r', [
+      { type: 'tool_result', tool_use_id: `t${n}`, content: `r${n}` },
+    ]),
+    row(base + 3, 'assistant', `resposta ${n}`),
+  ];
+
+  it('dos turnos antes dos últimos N fica só o texto do assistant', () => {
+    const messages = rowsToMessages([...turn(1, 1), ...turn(5, 2)], 1);
+
+    expect(messages.slice(0, 2)).toEqual([
+      { role: 'user', content: 'pergunta 1' },
+      { role: 'assistant', content: 'vou ver\n\nresposta 1' },
+    ]);
+    expect(messages).toHaveLength(6);
+    expect(JSON.stringify(messages)).not.toContain('r1');
+    expect(JSON.stringify(messages)).toContain('r2');
+  });
+
+  it('mensagem do usuário com payload volta com os blocos (texto + estado)', () => {
+    const blocks = [
+      { type: 'text', text: 'oi' },
+      { type: 'text', text: '<estado>' },
+    ];
+    expect(rowsToMessages([row(1, 'user', 'oi', blocks)])).toEqual([
+      { role: 'user', content: blocks },
+    ]);
+  });
+});
+
+describe('shrinkToolResults', () => {
+  it('encurta só resultados de ferramenta acima do limite', () => {
+    const long = 'x'.repeat(50);
+    const [, results] = shrinkToolResults(
+      [
+        { role: 'assistant', content: [{ type: 'text', text: long }] },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'a', content: long },
+            { type: 'tool_result', tool_use_id: 'b', content: 'curto' },
+          ],
+        },
+      ],
+      10,
+    );
+    const [a, b] = results.content as Array<{ content: string }>;
+    expect(a.content).toContain('resultado antigo encurtado');
+    expect(b.content).toBe('curto');
+  });
+});
+
+describe('windowStart', () => {
+  it('o começo da janela só anda de step em step', () => {
+    expect(windowStart(10, 20, 20)).toBe(0);
+    expect(windowStart(39, 20, 20)).toBe(0);
+    expect(windowStart(40, 20, 20)).toBe(20);
+    expect(windowStart(59, 20, 20)).toBe(20);
+    expect(windowStart(25, 20)).toBe(5);
   });
 });

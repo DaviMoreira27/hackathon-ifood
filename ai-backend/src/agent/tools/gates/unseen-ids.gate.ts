@@ -24,7 +24,7 @@ export class UnseenIdsGate implements ToolGate {
     if (this.registry.isReadOnly(call.name, ctx)) {
       return Promise.resolve({ kind: 'run' });
     }
-    const unseen = unseenIds(call.input, ctx.facts.text);
+    const unseen = unseenIds(call.input, ctx.facts);
     if (unseen.length === 0) return Promise.resolve({ kind: 'run' });
     const list = unseen.map((u) => `${u.key}=${u.value}`).join(', ');
     this.logger.warn(

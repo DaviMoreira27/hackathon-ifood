@@ -55,11 +55,34 @@ export function factCorpus(
 }
 
 // O mesmo corpus, mas crescendo aos poucos durante o turno: cada texto entra uma vez e os
-// valores conhecidos são extraídos só dele, sem reler a conversa inteira a cada escrita.
+// valores conhecidos são extraídos só dele, sem reler a conversa inteira a cada escrita. Também
+// carrega o registro do chat (ids e valores de turnos que já saíram do histórico) e separa o que
+// é novo neste turno, para ser gravado nele.
 export class FactCorpus {
   private readonly parts: string[] = [];
   private readonly cents = new Set<number>();
+  private readonly ids = new Set<string>();
   private joined: string | undefined = '';
+  private fresh = 0;
+
+  remember(seen: { ids: string[]; cents: number[] }): void {
+    for (const id of seen.ids) this.ids.add(id);
+    for (const c of seen.cents) this.cents.add(c);
+  }
+
+  // O que entrar daqui em diante é novo (vai para o registro no fim do turno).
+  markFresh(): void {
+    this.fresh = this.parts.length;
+  }
+
+  freshFacts(): { ids: string[]; cents: number[] } {
+    const text = this.parts.slice(this.fresh).join('\n');
+    return { ids: idsInText(text), cents: [...knownCents(text)] };
+  }
+
+  hasId(value: string): boolean {
+    return this.ids.has(value) || this.text.includes(value);
+  }
 
   add(...texts: string[]): void {
     for (const text of texts) {
@@ -161,9 +184,28 @@ export function idsInInput(
 // Ids da chamada que nunca apareceram num resultado de ferramenta (ou texto do sistema) da conversa.
 export function unseenIds(
   input: unknown,
-  corpus: string,
+  corpus: string | { hasId(value: string): boolean },
 ): Array<{ key: string; value: string }> {
-  return idsInInput(input).filter((id) => !corpus.includes(id.value));
+  const seen =
+    typeof corpus === 'string'
+      ? (value: string) => corpus.includes(value)
+      : (value: string) => corpus.hasId(value);
+  return idsInInput(input).filter((id) => !seen(id.value));
+}
+
+// Valores de campos "...Id" num texto: em JSON ("cartId": "abc", "id": 12) e no formato do estado
+// do pedido (cartId abc, cartItemId xyz). Alimenta o registro de ids do chat.
+const JSON_ID = /"([A-Za-z_]*)"\s*:\s*(?:"([^"\\]{1,200})"|(-?\d{1,30})(?![\d.]))/g;
+const TEXT_ID = /\b([a-z][A-Za-z]*Id)\s+([^\s,;()]{1,200})/g;
+
+export function idsInText(text: string): string[] {
+  const out = new Set<string>();
+  for (const m of text.matchAll(JSON_ID)) {
+    const value = (m[2] ?? m[3]).trim();
+    if (ID_KEY.test(m[1]) && value) out.add(value);
+  }
+  for (const m of text.matchAll(TEXT_ID)) out.add(m[2]);
+  return [...out];
 }
 
 // ─── "disse que fez" ─────────────────────────────────────────────────────────
