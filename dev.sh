@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
 # Sobe (e derruba) o ambiente local inteiro, tudo neste computador:
-#   Postgres + RabbitMQ (containers) → migrações do banco → mock do iFood → ai-backend
+#   Postgres + RabbitMQ (containers) → migrações do banco → mock do iFood → ai-backend → front
 #
 #   ./dev.sh up              sobe o que não estiver no ar (pode rodar quantas vezes quiser)
 #   ./dev.sh down            para os backends e os containers (os dados do banco ficam)
 #   ./dev.sh status          mostra o que está no ar
-#   ./dev.sh logs [serviço]  acompanha os logs (ai-backend | ifood-backend; sem argumento, os dois)
+#   ./dev.sh logs [serviço]  acompanha os logs (ai-backend | ifood-backend | frontend; sem argumento, todos)
 #   ./dev.sh migrate         só roda as migrações pendentes (os containers precisam estar no ar)
-#   ./dev.sh restart         reinicia os dois backends
+#   ./dev.sh restart         reinicia os backends e o front
 #   ./dev.sh reset --yes     APAGA containers e volumes (banco e filas) e recomeça do zero
 #
-# Variáveis opcionais: CONTAINER_ENGINE (docker|podman), AI_BACKEND_PORT (3000), MOCK_PORT (3001).
-# O front do pagador não é iniciado aqui: o link de pagamento aponta para PAYMENT_LINK_TEMPLATE.
+# Variáveis opcionais: CONTAINER_ENGINE (docker|podman), AI_BACKEND_PORT (3000), MOCK_PORT (3001),
+# FRONT_PORT (5173). O front é o do pagador: o link de pagamento (PAYMENT_LINK_TEMPLATE) aponta para ele.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_DIR="$ROOT/.dev"
 AI_DIR="$ROOT/ai-backend"
 MOCK_DIR="$ROOT/ifood-backend"
+FRONT_DIR="$ROOT/frontend"
 
 PG_CONTAINER="ifood-postgres"
 RABBIT_CONTAINER="ifood-rabbitmq"
@@ -212,6 +213,23 @@ validate_env() {
   if [ "${mock_key:-dev-mock-key}" != "${ai_key:-dev-mock-key}" ]; then
     warn "MOCK_API_KEY (ifood-backend) é diferente de PAYMENTS_API_KEY (ai-backend): o ai-backend vai levar 401 ao criar cobranças"
   fi
+
+  # O front fala com o mock; sem NEXT_PUBLIC_API_URL ele cai nos dados mockados.
+  if [ ! -f "$FRONT_DIR/.env.local" ] && [ ! -f "$FRONT_DIR/.env" ]; then
+    printf 'NEXT_PUBLIC_API_URL=http://localhost:%s\n' "$(service_port ifood-backend)" >"$FRONT_DIR/.env.local"
+    say "  criei frontend/.env.local apontando para o mock (porta $(service_port ifood-backend))"
+  fi
+  local api_url
+  api_url="$(env_value NEXT_PUBLIC_API_URL "$FRONT_DIR/.env.local")"
+  [ -n "$api_url" ] || api_url="$(env_value NEXT_PUBLIC_API_URL "$FRONT_DIR/.env")"
+  if [ "$api_url" != "http://localhost:$(service_port ifood-backend)" ]; then
+    warn "NEXT_PUBLIC_API_URL do front (${api_url:-vazio}) não aponta para o mock em http://localhost:$(service_port ifood-backend)"
+  fi
+  local template
+  template="$(env_value PAYMENT_LINK_TEMPLATE "$env_file")"
+  if [ -n "$template" ] && [[ "$template" != *"localhost:$(service_port frontend)/"* ]]; then
+    warn "PAYMENT_LINK_TEMPLATE ($template) não aponta para o front em http://localhost:$(service_port frontend)"
+  fi
 }
 
 ensure_deps() { # diretório
@@ -232,10 +250,26 @@ service_port() { # serviço
       printf '%s' "${from_env:-3000}"
       ;;
     ifood-backend) printf '%s' "${MOCK_PORT:-3001}" ;;
+    frontend) printf '%s' "${FRONT_PORT:-5173}" ;;
   esac
 }
 
-service_dir() { case "$1" in ai-backend) printf '%s' "$AI_DIR" ;; ifood-backend) printf '%s' "$MOCK_DIR" ;; esac; }
+service_dir() {
+  case "$1" in
+    ai-backend) printf '%s' "$AI_DIR" ;;
+    ifood-backend) printf '%s' "$MOCK_DIR" ;;
+    frontend) printf '%s' "$FRONT_DIR" ;;
+  esac
+}
+
+# Comando de desenvolvimento de cada serviço. Os backends leem PORT do ambiente; o Next recebe -p
+# (o script "dev" do front fixa a 5173).
+service_cmd() { # serviço porta
+  case "$1" in
+    frontend) printf 'npx next dev -p %s' "$2" ;;
+    *) printf 'npm run start:dev' ;;
+  esac
+}
 
 # ───────────────────────── serviços (processos) ─────────────────────────
 
@@ -271,9 +305,12 @@ start_service() { # serviço
   if port_in_use "$port"; then
     local port_var=AI_BACKEND_PORT
     [ "$name" = "ifood-backend" ] && port_var=MOCK_PORT
+    [ "$name" = "frontend" ] && port_var=FRONT_PORT
     die "a porta $port (necessária para $name) já está em uso por outro processo. Libere-a ou rode com $port_var=<outra porta>."
   fi
 
+  local cmd
+  cmd="$(service_cmd "$name" "$port")"
   mkdir -p "$RUN_DIR"
   : >"$log"
   # setsid: o serviço vira líder de um grupo de processos próprio, para o down matar a árvore toda
@@ -281,9 +318,9 @@ start_service() { # serviço
   (
     cd "$dir"
     if is_windows; then
-      PORT="$port" npm run start:dev >>"$log" 2>&1 </dev/null &
+      PORT="$port" $cmd >>"$log" 2>&1 </dev/null &
     else
-      PORT="$port" setsid npm run start:dev >>"$log" 2>&1 </dev/null &
+      PORT="$port" setsid $cmd >>"$log" 2>&1 </dev/null &
     fi
     echo $! >"$(pid_file "$name")"
   )
@@ -346,6 +383,7 @@ cmd_up() {
   # Não mexe em node_modules de um serviço que já está rodando.
   service_pid ai-backend >/dev/null || ensure_deps "$AI_DIR"
   service_pid ifood-backend >/dev/null || ensure_deps "$MOCK_DIR"
+  service_pid frontend >/dev/null || ensure_deps "$FRONT_DIR"
   start_infra
   step "Banco de dados"
   "$AI_DIR/db/migrate.sh" apply
@@ -353,6 +391,8 @@ cmd_up() {
   # O mock primeiro: ele declara a fila de eventos, então nada publicado se perde.
   start_service ifood-backend
   start_service ai-backend
+  step "Front"
+  start_service frontend
   print_summary
 }
 
@@ -362,6 +402,7 @@ print_summary() {
   step "Tudo no ar"
   say "  ai-backend      http://localhost:$(service_port ai-backend)  (Telegram, agente, OAuth, consumidor de eventos)"
   say "  ifood-backend   http://localhost:$(service_port ifood-backend)  (mock do iFood: cobranças e eventos de pagamento)"
+  say "  frontend        http://localhost:$(service_port frontend)  (página de pagamento do link enviado no Telegram)"
   say "  RabbitMQ        http://localhost:$RABBIT_UI_PORT  (painel; usuário ifood / senha ifood)"
   say "  Postgres        localhost:$PG_PORT  (usuário ifood / senha ifood / banco ifood)"
   say "  link de pagamento enviado no Telegram: ${template:-http://localhost:5173/pay/{token}}"
@@ -369,7 +410,8 @@ print_summary() {
 }
 
 cmd_down() {
-  step "Parando backends"
+  step "Parando front e backends"
+  stop_service frontend
   stop_service ai-backend
   stop_service ifood-backend
   if detect_engine_quiet; then
@@ -402,7 +444,7 @@ cmd_status() {
     say "Containers: nenhum docker/podman utilizável"
   fi
   say "Serviços:"
-  for name in ifood-backend ai-backend; do
+  for name in ifood-backend ai-backend frontend; do
     port="$(service_port "$name")"
     if pid="$(service_pid "$name")"; then
       if http_ok "$port"; then state="${C_GREEN}no ar${C_RESET} (pid $pid)"; else state="${C_YELLOW}iniciando/sem resposta${C_RESET} (pid $pid)"; fi
@@ -421,10 +463,10 @@ cmd_logs() {
   case "$target" in
     "") [ -d "$RUN_DIR" ] && ls "$RUN_DIR"/*.log >/dev/null 2>&1 || die "ainda não há logs (rode ./dev.sh up)"
         exec tail -n 40 -f "$RUN_DIR"/*.log ;;
-    ai-backend|ifood-backend)
+    ai-backend|ifood-backend|frontend)
         [ -f "$(log_file "$target")" ] || die "ainda não há log de $target"
         exec tail -n 80 -f "$(log_file "$target")" ;;
-    *) die "serviço desconhecido: $target (use ai-backend ou ifood-backend)" ;;
+    *) die "serviço desconhecido: $target (use ai-backend, ifood-backend ou frontend)" ;;
   esac
 }
 
@@ -435,11 +477,13 @@ cmd_migrate() {
 
 cmd_restart() {
   need_service_cmds
-  step "Reiniciando backends"
+  step "Reiniciando backends e front"
+  stop_service frontend
   stop_service ai-backend
   stop_service ifood-backend
   start_service ifood-backend
   start_service ai-backend
+  start_service frontend
 }
 
 cmd_reset() {
