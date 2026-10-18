@@ -8,8 +8,8 @@ import {
   type NewMessage,
   windowStart,
 } from '../messages/messages.service.js';
-import type { GroupOrderTools } from '../group-order/group-order.tools.js';
-import type { DietaryTools } from '../dietary/dietary.tools.js';
+import type { GroupOrderTools } from '../group-order/index.js';
+import type { DietaryTools } from '../dietary/index.js';
 import type { UsersService } from '../users/users.service.js';
 import { DEFAULT_AGENT_CONFIG } from './agent.config.js';
 import { AgentService } from './agent.service.js';

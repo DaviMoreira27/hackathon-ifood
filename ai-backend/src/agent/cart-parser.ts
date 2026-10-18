@@ -1,81 +1,14 @@
-import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
-import type { SyncCartInput } from '../group-order/group-order.service.js';
+import type { SyncCartInput } from '../group-order/index.js';
 import { isObj, parseJsonSafe, pick, text, type Obj } from '../common/json.js';
 import { unwrapToolText } from './tool-envelope.js';
-import { appConfig } from '../config/app-config.js';
 
-// Sync automático do carrinho: depois de cada alteração bem-sucedida num carrinho do iFood, o
-// código lê o carrinho (getCart) e registra no pedido em grupo os itens, preços, subtotal e total
-// exatamente como o iFood devolveu. O LLM nunca transcreve número que vira cobrança.
-// O formato do getCart do MCP real não é documentado aqui: o parser procura os campos pelos nomes
-// mais prováveis e confere que soma(preço × quantidade) = subtotal. Se algo não fecha, devolve o
-// motivo e o agent avisa o LLM para usar group_sync_cart (caminho manual, de reserva).
+// Leitura tolerante do resultado do getCart. O formato do MCP real não é documentado aqui: o
+// parser procura os campos pelos nomes mais prováveis e confere que soma(preço × quantidade) =
+// subtotal. Se algo não fecha, devolve o motivo e o hook manda o LLM usar group_sync_cart.
 
-export const GET_CART = 'getCart';
-
-// MCP_CART_SYNC_TOOLS (nomes separados por vírgula) substitui a lista padrão.
-export function triggersCartSync(
-  name: string,
-  tools: string[] = appConfig().mcp.cartSyncTools,
-): boolean {
-  return tools.includes(name);
-}
-
-const CART_ID_KEYS = ['cartId', 'cart_id', 'ifoodCartId'];
-
-function findCartId(value: unknown, depth = 0): string | null {
-  if (depth > 6) return null;
-  if (Array.isArray(value)) {
-    for (const v of value) {
-      const found = findCartId(v, depth + 1);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (!isObj(value)) return null;
-  for (const key of CART_ID_KEYS) {
-    const v = value[key];
-    if (typeof v === 'string' && v.trim()) return v.trim();
-    if (typeof v === 'number') return String(v);
-  }
-  if (isObj(value.cart) && typeof value.cart.id === 'string') {
-    return value.cart.id;
-  }
-  for (const v of Object.values(value)) {
-    const found = findCartId(v, depth + 1);
-    if (found) return found;
-  }
-  return null;
-}
-
-const parseJson = (output: string): unknown =>
+// JSON do resultado de uma ferramenta (sem o envelope de dados não confiáveis).
+export const parseJson = (output: string): unknown =>
   parseJsonSafe(unwrapToolText(output));
-
-// O carrinho alterado: primeiro o argumento da chamada, depois o resultado da ferramenta.
-export function cartIdOf(input: unknown, output: string): string | null {
-  return findCartId(input) ?? findCartId(parseJson(output));
-}
-
-// Argumentos do getCart a partir do schema anunciado pelo MCP. null = não dá para saber.
-export function getCartArgs(
-  tools: Tool[],
-  cartId: string,
-): Record<string, string> | null {
-  const tool = tools.find((t) => t.name === GET_CART);
-  if (!tool) return null;
-  const schema = tool.input_schema as {
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
-  const props = Object.keys(schema.properties ?? {});
-  const key =
-    CART_ID_KEYS.find((k) => props.includes(k)) ??
-    (schema.required?.length === 1 ? schema.required[0] : undefined) ??
-    (props.length === 1 ? props[0] : undefined);
-  return key ? { [key]: cartId } : null;
-}
-
-// ─── leitura tolerante do resultado do getCart ──────────────────────────────
 
 // Valor em reais: número, string numérica ou { value | amount }.
 function money(v: unknown): number | null {

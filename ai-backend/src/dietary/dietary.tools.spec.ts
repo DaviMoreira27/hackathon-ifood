@@ -1,14 +1,13 @@
 import type { SavedRestriction } from './dietary.check.js';
 import type { DietaryService } from './dietary.service.js';
+import { DIET_LIMIT_APPENDIX, policyFor } from './dietary.policy.js';
 import {
   DIET_CHECK,
-  DIET_LIMIT_APPENDIX,
   DIET_REMOVE,
   DIET_SAVE,
   DIET_TOOLS,
-  DietaryTools,
-  policyFor,
-} from './dietary.tools.js';
+} from './dietary.tool-defs.js';
+import { DietaryTools } from './dietary.tools.js';
 import { resetAppConfig } from '../config/app-config.js';
 
 const CTX = { chatId: 10, userId: 7 };

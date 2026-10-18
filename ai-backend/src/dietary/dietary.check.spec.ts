@@ -4,7 +4,7 @@ import {
   personKeyOf,
   type SavedRestriction,
 } from './dietary.check.js';
-import { RESTRICTIONS } from './dietary.catalog.js';
+import { RESTRICTIONS } from './catalog/index.js';
 
 const known = (
   kind: string,

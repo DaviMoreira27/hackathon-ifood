@@ -2,7 +2,7 @@ import {
   McpUnauthorizedError,
   type McpService,
 } from '../../../mcp/mcp.service.js';
-import { triggersCartSync } from '../../cart-sync.js';
+import { triggersCartSync } from '../hooks/cart-sync.hook.js';
 import { wrapToolResult } from '../../tool-envelope.js';
 import type { TurnContext } from '../../turn/turn-context.js';
 import type {

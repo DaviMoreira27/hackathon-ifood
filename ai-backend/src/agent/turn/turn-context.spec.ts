@@ -1,4 +1,4 @@
-import type { OrderView } from '../../group-order/group-order.service.js';
+import type { OrderView } from '../../group-order/index.js';
 import { TurnContext } from './turn-context.js';
 
 const view = (id: number) =>

@@ -1,5 +1,5 @@
 import type { Logger } from '@nestjs/common';
-import type { GroupOrderTools } from '../../../group-order/group-order.tools.js';
+import type { GroupOrderTools } from '../../../group-order/index.js';
 import { wrapToolResult } from '../../tool-envelope.js';
 import type { TurnContext } from '../../turn/turn-context.js';
 import type {

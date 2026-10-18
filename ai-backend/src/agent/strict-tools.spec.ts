@@ -1,6 +1,6 @@
-import { GROUP_TOOLS } from '../group-order/group-order.tools.js';
-import { DIET_TOOLS } from '../dietary/dietary.tools.js';
-import { PRICE_TOOLS } from './price-tools.js';
+import { GROUP_TOOLS } from '../group-order/index.js';
+import { DIET_TOOLS } from '../dietary/index.js';
+import { PRICE_TOOLS } from './tools/sources/price.source.js';
 import { strictTool } from './strict-tools.js';
 
 // Percorre o schema e devolve todo nó de objeto e toda chave usada.

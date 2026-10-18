@@ -4,7 +4,7 @@ import {
   RESTRICTIONS,
   type DietCategory,
   type RestrictionDef,
-} from './dietary.catalog.js';
+} from './catalog/index.js';
 
 // O veredito sai daqui, do código, e não do LLM: ele só copia nome e descrição do item como o
 // iFood devolveu e explica o resultado ao usuário. O filtro é conservador (na dúvida, corta ou

@@ -3,10 +3,10 @@ import amqp, {
   type ChannelModel,
   type GetMessage,
 } from 'amqplib';
+import { parseEvent } from './payment-event.parser.js';
 import {
   PaymentEventsConsumer,
   type PaymentEventsConsumerOptions,
-  parseEvent,
 } from './payment-events.consumer.js';
 import {
   PaymentsService,
@@ -247,8 +247,8 @@ describe.skipIf(!process.env.TEST_RABBITMQ_URL)(
       await waitFor(() => consumer.consuming);
 
       await (
-        consumer as unknown as { connection: ChannelModel }
-      ).connection.close();
+        consumer as unknown as { rabbit: { connection: ChannelModel } }
+      ).rabbit.connection.close();
       await waitFor(() => !consumer.consuming);
       await waitFor(() => consumer.consuming);
 

@@ -1,5 +1,5 @@
 import type { Logger } from '@nestjs/common';
-import type { DietaryTools } from '../../../dietary/dietary.tools.js';
+import type { DietaryTools } from '../../../dietary/index.js';
 import { wrapToolResult } from '../../tool-envelope.js';
 import type { TurnContext } from '../../turn/turn-context.js';
 import type {

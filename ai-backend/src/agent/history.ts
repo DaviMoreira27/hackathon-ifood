@@ -37,7 +37,10 @@ export function rowsToMessages(
 
     if (row.role === 'user') {
       const blocks = row.payload as ContentBlockParam[] | null;
-      out.push({ role: 'user', content: blocks?.length ? blocks : row.content });
+      out.push({
+        role: 'user',
+        content: blocks?.length ? blocks : row.content,
+      });
     } else if (row.role === 'assistant') {
       // Blocos de raciocínio (thinking) de turnos anteriores não voltam ao modelo. A assinatura de
       // cada bloco amarra a conversa exata em que ele nasceu, e o histórico remontado do banco

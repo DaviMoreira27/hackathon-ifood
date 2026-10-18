@@ -6,8 +6,8 @@ import type {
   MessageCreateParamsNonStreaming,
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/messages.js';
-import { policyFor, type DietaryTools } from '../../dietary/dietary.tools.js';
-import type { GroupOrderTools } from '../../group-order/group-order.tools.js';
+import { policyFor, type DietaryTools } from '../../dietary/index.js';
+import type { GroupOrderTools } from '../../group-order/index.js';
 import {
   McpUnauthorizedError,
   type McpService,

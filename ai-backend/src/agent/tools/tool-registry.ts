@@ -1,7 +1,7 @@
 import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
-import { DIET_TOOLS } from '../../dietary/dietary.tools.js';
-import type { GroupOrderTools } from '../../group-order/group-order.tools.js';
-import { PRICE_TOOLS } from '../price-tools.js';
+import { DIET_TOOLS } from '../../dietary/index.js';
+import type { GroupOrderTools } from '../../group-order/index.js';
+import { PRICE_TOOLS } from './sources/price.source.js';
 import { strictTool } from '../strict-tools.js';
 import type { TurnContext } from '../turn/turn-context.js';
 import type { ToolHandler, ToolSource } from './tool-handler.js';

@@ -1,7 +1,8 @@
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages.js';
-import { isObj, text as clean, type Obj } from '../common/json.js';
+import { isObj, text as clean } from '../common/json.js';
 import { unwrapToolText } from './tool-envelope.js';
-import { appConfig } from '../config/app-config.js';
+import { itemCaption, merchantCaption } from './image-captions.js';
+import { IMAGE_EXT, resolve } from './image-trust.js';
 
 // Fotos de pratos e logos de lojas. O LLM escolhe quais mostrar escrevendo, numa linha própria,
 // ![](item:<itemId>) ou ![](merchant:<merchantId>) — ou ![legenda](url) com a URL exata.
@@ -32,113 +33,11 @@ export const MAX_REPLY_IMAGES = 6;
 const MAX_CAPTION = 200;
 // Campos genéricos de imagem, para formatos que não conhecemos.
 const IMAGE_KEY = /image|img|logo|photo|picture|thumb|banner|cover/i;
-const IMAGE_EXT = /\.(jpe?g|png|webp|gif)(\?|$)/i;
 const URL_IN_TEXT = /https:\/\/[^\s"'<>()\\]+/g;
 const MARKDOWN_IMAGE =
   /!\[([^\]\n]*)\]\(((?:https?:\/\/|item:|merchant:)[^)\s]+)\)/g;
 
-export function isTrustedImageUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== 'https:') return false;
-  const host = parsed.hostname.toLowerCase();
-  const trusted = [
-    'ifood-static.com.br',
-    'ifood.com.br',
-    ...appConfig().trustedImageHosts,
-  ];
-  return trusted.some((t) => host === t || host.endsWith(`.${t}`));
-}
-
-// Caminho relativo de imagem (ex.: "pratos/abc.jpg") só vira URL se IFOOD_IMAGE_BASE_URL estiver
-// definida: não dá para adivinhar o prefixo do CDN.
-function resolve(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const v = value.trim();
-  let url: string | null = null;
-  if (/^https:\/\//i.test(v)) {
-    url = v;
-  } else {
-    const base = appConfig().imageBaseUrl;
-    if (!base || /^[a-z]+:/i.test(v) || !IMAGE_EXT.test(v)) return null;
-    try {
-      url = new URL(
-        v.replace(/^\/+/, ''),
-        base.endsWith('/') ? base : `${base}/`,
-      ).href;
-    } catch {
-      return null;
-    }
-  }
-  return isTrustedImageUrl(url) ? url : null;
-}
-
-// ─── Legendas a partir dos campos do Offer Discovery MCP ─────────────────────
-
-const num = (v: unknown): number | null =>
-  typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
 const text = (v: unknown, max = 60): string => clean(v, max);
-
-const brl = (value: number) =>
-  `R$ ${value
-    .toFixed(2)
-    .replace('.', ',')
-    .replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
-
-// Preço final do item: promotionalUnitPrice quando existe (e é menor), senão unitPrice.
-function priceLabel(o: Obj): string {
-  const unit = num(o.unitPrice);
-  const promo = num(o.promotionalUnitPrice);
-  if (promo !== null && unit !== null && promo < unit) {
-    return `${brl(promo)} (de ${brl(unit)})`;
-  }
-  const price = promo ?? unit;
-  return price === null ? '' : brl(price);
-}
-
-// Taxa de entrega: promotionalFee quando existe, senão fee. Em getMerchant (deliveryMethods[]),
-// vale o método mais barato.
-function deliveryLabel(o: Obj): string {
-  const methods = Array.isArray(o.deliveryMethods)
-    ? o.deliveryMethods.filter(isObj)
-    : isObj(o.deliveryMethod)
-      ? [o.deliveryMethod]
-      : [];
-  const fees = methods
-    .map((m) => num(m.promotionalFee) ?? num(m.fee))
-    .filter((f): f is number => f !== null);
-  if (fees.length === 0) return '';
-  const fee = Math.min(...fees);
-  return fee === 0 ? 'entrega grátis' : `entrega ${brl(fee)}`;
-}
-
-function merchantCaption(o: Obj): string {
-  const rating = num(o.reviewRating);
-  return [
-    text(o.merchantName),
-    rating === null ? '' : `⭐ ${rating.toFixed(1).replace('.', ',')}`,
-    deliveryLabel(o),
-  ]
-    .filter(Boolean)
-    .join(' · ');
-}
-
-// featuredItems de getMerchant não repetem o nome da loja: vem do objeto pai (inheritedMerchant).
-function itemCaption(o: Obj, inheritedMerchant: string): string {
-  const merchant =
-    text(o.merchantName) ||
-    (isObj(o.merchant) ? text(o.merchant.merchantName) : '') ||
-    inheritedMerchant;
-  const name = text(o.itemName, 80);
-  const price = priceLabel(o);
-  return [name && price ? `${name} — ${price}` : name || price, merchant]
-    .filter(Boolean)
-    .join(' · ');
-}
 
 function add(
   catalog: ImageCatalog,

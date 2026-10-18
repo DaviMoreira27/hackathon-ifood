@@ -10,20 +10,24 @@ import type {
   SyncCartResult,
 } from './group-order.types.js';
 import { OrderCommandService } from './order-command.service.js';
+import { OrderLifecycleService } from './order-lifecycle.service.js';
 import { OrderQueryService } from './order-query.service.js';
 
 export * from './group-order.types.js';
 
-// Ponto de entrada do pedido em grupo: leituras em OrderQueryService, escritas em
-// OrderCommandService e cobranças em ChargesService.
+// Ponto de entrada do pedido em grupo: leituras em OrderQueryService, montagem em
+// OrderCommandService, confirmação/reabertura/cancelamento em OrderLifecycleService e cobranças
+// em ChargesService.
 @Injectable()
 export class GroupOrderService {
   private readonly query: OrderQueryService;
   private readonly commands: OrderCommandService;
+  private readonly lifecycle: OrderLifecycleService;
 
   constructor(database: DbService, paymentsService: PaymentsService) {
     this.query = new OrderQueryService(database);
-    this.commands = new OrderCommandService(
+    this.commands = new OrderCommandService(database);
+    this.lifecycle = new OrderLifecycleService(
       database,
       this.query,
       new ChargesService(database, paymentsService),
@@ -55,15 +59,15 @@ export class GroupOrderService {
   }
 
   confirmOrder(userId: number) {
-    return this.commands.confirmOrder(userId);
+    return this.lifecycle.confirmOrder(userId);
   }
 
   reopenOrder(userId: number) {
-    return this.commands.reopenOrder(userId);
+    return this.lifecycle.reopenOrder(userId);
   }
 
   cancelOrder(userId: number) {
-    return this.commands.cancelOrder(userId);
+    return this.lifecycle.cancelOrder(userId);
   }
 
   markFinalized(userId: number, orderId?: number) {

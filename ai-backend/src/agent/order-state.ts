@@ -1,4 +1,4 @@
-import type { OrderView } from '../group-order/group-order.service.js';
+import type { OrderView } from '../group-order/index.js';
 import { UNTRUSTED_TAG } from './tool-envelope.js';
 
 // Estado do pedido em grupo montado pelo código. Vai em dois lugares:

@@ -1,7 +1,6 @@
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages.js';
 import type { TraceTool } from '../../db/schema.js';
-import type { OrderView } from '../../group-order/group-order.service.js';
-import type { ToolContext } from '../../group-order/group-order.tools.js';
+import type { OrderView, ToolContext } from '../../group-order/index.js';
 import type { McpSession } from '../../mcp/mcp.service.js';
 import { FactCorpus, factTexts } from '../reply-check.js';
 

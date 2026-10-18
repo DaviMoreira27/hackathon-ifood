@@ -2,8 +2,18 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "rules": {
     "typescript/no-explicit-any": "off",
-    "typescript/no-floating-promises": "error"
+    "typescript/no-floating-promises": "error",
+    "eslint/max-lines": [
+      "warn",
+      { "max": 400, "skipBlankLines": true, "skipComments": true }
+    ]
   },
+  "overrides": [
+    {
+      "files": ["**/*.spec.ts", "eval/**", "src/dietary/catalog/**"],
+      "rules": { "eslint/max-lines": "off" }
+    }
+  ],
   "env": {
     "node": true
   }

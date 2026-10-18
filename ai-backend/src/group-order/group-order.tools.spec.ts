@@ -1,6 +1,7 @@
 import { GroupOrderError } from './group-order.errors.js';
 import type { GroupOrderService } from './group-order.service.js';
-import { GROUP_TOOLS, GroupOrderTools } from './group-order.tools.js';
+import { GROUP_TOOLS } from './group-order.tool-defs.js';
+import { GroupOrderTools } from './group-order.tools.js';
 import { resetAppConfig } from '../config/app-config.js';
 
 const CTX = { chatId: 10, userId: 7 };

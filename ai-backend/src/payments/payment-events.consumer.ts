@@ -5,26 +5,22 @@ import {
   OnModuleInit,
   Optional,
 } from '@nestjs/common';
-import amqp, {
-  type ChannelModel,
-  type ConfirmChannel,
-  type ConsumeMessage,
-} from 'amqplib';
+import type { ConfirmChannel, ConsumeMessage } from 'amqplib';
 import { describeError } from '../common/describe-error.js';
 import {
   PaymentsService,
   UnrecoverableEventError,
 } from './payments.service.js';
 import {
-  PAYMENT_CONFIRMED,
   PAYMENTS_BINDING_KEY,
   PAYMENTS_DLQ,
   PAYMENTS_EXCHANGE,
   PAYMENTS_QUEUE,
   PAYMENTS_RETRY_QUEUE,
-  type PaymentConfirmedEvent,
 } from './topology.js';
 import { appConfig } from '../config/app-config.js';
+import { InvalidEventError, parseEvent } from './payment-event.parser.js';
+import { RabbitConnection } from './rabbit-connection.js';
 
 export interface PaymentEventsConsumerOptions {
   url: string;
@@ -52,175 +48,65 @@ export function defaultConsumerOptions(): PaymentEventsConsumerOptions {
   };
 }
 
-// Mensagem malformada ou de versão desconhecida: não adianta tentar de novo.
-class InvalidEventError extends Error {}
-
-export function parseEvent(
-  content: Buffer,
-): PaymentConfirmedEvent | { ignored: string } {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(content.toString('utf8'));
-  } catch {
-    throw new InvalidEventError('JSON inválido');
-  }
-  const event = raw as Partial<PaymentConfirmedEvent> | null;
-  if (
-    !event ||
-    typeof event !== 'object' ||
-    typeof event.eventId !== 'string' ||
-    !event.eventId
-  ) {
-    throw new InvalidEventError('eventId ausente');
-  }
-  if (event.type !== PAYMENT_CONFIRMED) {
-    // Outros eventos "payment.*" que venham a existir: não é erro, só não é com a gente.
-    return { ignored: String(event.type) };
-  }
-  if (event.version !== 1) {
-    throw new InvalidEventError(
-      `versão não suportada: ${String(event.version)}`,
-    );
-  }
-  const data = event.data;
-  if (
-    !data ||
-    typeof data.reference !== 'string' ||
-    !Number.isInteger(data.amountCents) ||
-    (data.amountCents as number) <= 0 ||
-    typeof data.paidAt !== 'string' ||
-    Number.isNaN(Date.parse(data.paidAt))
-  ) {
-    throw new InvalidEventError('campos de data inválidos');
-  }
-  return event as PaymentConfirmedEvent;
-}
-
 // Consome `payment.confirmed` do RabbitMQ.
 //  - ack só depois de aplicar no banco (at-least-once; a aplicação é idempotente);
 //  - falha transitória → fila de retry (espera retryDelayMs) até maxAttempts, depois DLQ;
 //  - falha definitiva (evento inválido/inconsistente) → DLQ direto;
-//  - reconecta sozinho se o RabbitMQ cair; o app sobe mesmo com o RabbitMQ fora.
+//  - reconecta sozinho se o RabbitMQ cair; o app sobe mesmo com o RabbitMQ fora (RabbitConnection).
 @Injectable()
 export class PaymentEventsConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PaymentEventsConsumer.name);
   private readonly options: PaymentEventsConsumerOptions;
-  private connection: ChannelModel | null = null;
-  private channel: ConfirmChannel | null = null;
-  private stopped = false;
-  private wake: (() => void) | null = null;
-  private loopDone: Promise<void> = Promise.resolve();
-  private readonly inFlight = new Set<Promise<void>>();
+  private readonly rabbit: RabbitConnection;
 
   constructor(
     private readonly payments: PaymentsService,
     @Optional() options?: PaymentEventsConsumerOptions,
   ) {
     this.options = options ?? defaultConsumerOptions();
+    this.rabbit = new RabbitConnection(
+      { url: this.options.url, setup: (channel) => this.setup(channel) },
+      this.logger,
+    );
   }
 
   get consuming(): boolean {
-    return this.channel !== null;
+    return this.rabbit.channel !== null;
   }
 
   onModuleInit(): void {
-    this.loopDone = this.run(); // não bloqueia o boot
+    this.rabbit.start();
   }
 
-  async onModuleDestroy(): Promise<void> {
-    this.stopped = true;
-    this.wake?.();
-    // Deixa terminar o que já está sendo processado; o resto fica na fila (não recebe ack).
-    const channel = this.channel;
-    this.channel = null;
-    await channel?.close().catch(() => undefined);
-    await Promise.race([
-      Promise.allSettled(this.inFlight),
-      new Promise((resolve) => setTimeout(resolve, 5000)),
-    ]);
-    await this.connection?.close().catch(() => undefined);
-    this.connection = null;
-    await this.loopDone;
+  // Deixa terminar o que já está sendo processado; o resto fica na fila (não recebe ack).
+  onModuleDestroy(): Promise<void> {
+    return this.rabbit.stop();
   }
 
-  private async run(): Promise<void> {
-    let backoff = 1000;
-    while (!this.stopped) {
-      try {
-        const { closed } = await this.connect();
-        backoff = 1000;
-        await closed; // fica aqui enquanto a conexão estiver de pé
-        if (!this.stopped)
-          this.logger.warn('Conexão com o RabbitMQ caiu; reconectando...');
-      } catch (err) {
-        if (this.stopped) break;
-        this.logger.warn(
-          `Consumidor sem conexão com o RabbitMQ (nova tentativa em ${backoff}ms): ${describeError(err)}`,
-        );
-        await this.cleanup();
-        await this.sleep(backoff);
-        backoff = Math.min(backoff * 2, 15_000);
-        continue;
-      }
-      await this.cleanup();
-      if (!this.stopped) await this.sleep(1000);
-    }
-  }
-
-  // Conecta, declara a topologia e começa a consumir. `closed` resolve quando a conexão fechar
-  // (num objeto: devolver a promise direto faria o await esperar a conexão cair).
-  private async connect(): Promise<{ closed: Promise<void> }> {
-    const { url, queue, retryQueue, dlq, retryDelayMs, prefetch } =
-      this.options;
-    const connection = await amqp.connect(url);
-    // Sem listener de 'error', um erro de conexão derrubaria o processo.
-    connection.on('error', (err: Error) =>
-      this.logger.warn(`Conexão com o RabbitMQ: ${err.message}`),
-    );
-    const closed = new Promise<void>((resolve) =>
-      connection.once('close', () => resolve()),
-    );
-
-    try {
-      const channel = await connection.createConfirmChannel();
-      channel.on('error', (err: Error) =>
-        this.logger.warn(`Canal do RabbitMQ: ${err.message}`),
-      );
-
-      await channel.assertExchange(PAYMENTS_EXCHANGE, 'topic', {
-        durable: true,
-      });
-      await channel.assertQueue(queue, { durable: true });
-      await channel.bindQueue(queue, PAYMENTS_EXCHANGE, PAYMENTS_BINDING_KEY);
-      await channel.assertQueue(dlq, { durable: true });
-      // Retry: a mensagem espera o TTL e é "dead-lettered" para o exchange padrão ('') com a
-      // routing key = fila principal, ou seja, volta direto para ela.
-      await channel.assertQueue(retryQueue, {
-        durable: true,
-        arguments: {
-          'x-message-ttl': retryDelayMs,
-          'x-dead-letter-exchange': '',
-          'x-dead-letter-routing-key': queue,
-        },
-      });
-      await channel.prefetch(prefetch);
-      await channel.consume(queue, (message) => {
-        if (message) this.track(this.handle(channel, message));
-      });
-
-      this.connection = connection;
-      this.channel = channel;
-      this.logger.log(`Consumindo eventos de pagamento da fila ${queue}`);
-      return { closed };
-    } catch (err) {
-      await connection.close().catch(() => undefined);
-      throw err;
-    }
-  }
-
-  private track(work: Promise<void>): void {
-    this.inFlight.add(work);
-    void work.finally(() => this.inFlight.delete(work));
+  // Topologia (exchange, fila principal, retry e DLQ) e consumo, a cada conexão.
+  private async setup(channel: ConfirmChannel): Promise<void> {
+    const { queue, retryQueue, dlq, retryDelayMs, prefetch } = this.options;
+    await channel.assertExchange(PAYMENTS_EXCHANGE, 'topic', {
+      durable: true,
+    });
+    await channel.assertQueue(queue, { durable: true });
+    await channel.bindQueue(queue, PAYMENTS_EXCHANGE, PAYMENTS_BINDING_KEY);
+    await channel.assertQueue(dlq, { durable: true });
+    // Retry: a mensagem espera o TTL e é "dead-lettered" para o exchange padrão ('') com a
+    // routing key = fila principal, ou seja, volta direto para ela.
+    await channel.assertQueue(retryQueue, {
+      durable: true,
+      arguments: {
+        'x-message-ttl': retryDelayMs,
+        'x-dead-letter-exchange': '',
+        'x-dead-letter-routing-key': queue,
+      },
+    });
+    await channel.prefetch(prefetch);
+    await channel.consume(queue, (message) => {
+      if (message) this.rabbit.track(this.handle(channel, message));
+    });
+    this.logger.log(`Consumindo eventos de pagamento da fila ${queue}`);
   }
 
   // Exposto para testes.
@@ -282,24 +168,5 @@ export class PaymentEventsConsumer implements OnModuleInit, OnModuleDestroy {
         `Não consegui redirecionar o evento (ficará sem ack): ${describeError(publishErr)}`,
       );
     }
-  }
-
-  private async cleanup(): Promise<void> {
-    const connection = this.connection;
-    this.connection = null;
-    this.channel = null;
-    await connection?.close().catch(() => undefined);
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      const done = () => {
-        clearTimeout(timer);
-        this.wake = null;
-        resolve();
-      };
-      const timer = setTimeout(done, ms);
-      this.wake = done;
-    });
   }
 }

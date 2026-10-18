@@ -262,7 +262,7 @@ que fiquem sozinhos no arquivo.
 
 Tudo sem mudar comportamento: mover código, ajustar imports, specs verdes a cada passo.
 
-- [ ] 4.1 **`group-order.service.ts` (1052) em arquivos**, completando o 1.9:
+- [x] 4.1 **`group-order.service.ts` (1052) em arquivos**, completando o 1.9:
       ```
       group-order/
         order-query.service.ts      getOrderView, hasPaidOrder, openIfoodCartIds
@@ -273,39 +273,39 @@ Tudo sem mudar comportamento: mover código, ajustar imports, specs verdes a cad
         order.lookups.ts            findActiveOrder, requireCollecting, findCart, findParticipant
       ```
       `order-view.ts` puro permite testar a prévia e os `problems` sem banco.
-- [ ] 4.2 **`group-order.tools.ts` (461)**: as definições (`GROUP_TOOLS`, ~130 linhas de schema)
+- [x] 4.2 **`group-order.tools.ts` (461)**: as definições (`GROUP_TOOLS`, ~130 linhas de schema)
       para `group-order.tool-defs.ts`; `str`/`num`/`parseSyncCart` para `group-order.input.ts`; a
       montagem do texto do `group_confirm_order` (links, nota) para uma função própria. Depois da
       fase 1 a classe vira o `group.source.ts` e fica só com o despacho.
-- [ ] 4.3 **`dietary.tools.ts` (451)**, mesma divisão: `dietary.tool-defs.ts` (`DIET_TOOLS`),
+- [x] 4.3 **`dietary.tools.ts` (451)**, mesma divisão: `dietary.tool-defs.ts` (`DIET_TOOLS`),
       `dietary.input.ts` (`parseRestriction`, `parseItems`, `personStr`...), `dietary.policy.ts`
       (`policyFor`, texto que entra no system) e `verdict-cache.ts` (o `Map` de veredictos por
       usuário com limite `MAX_REMEMBERED`, hoje dentro da classe).
-- [ ] 4.4 **`dietary.catalog.ts` (613)**: é dado, não lógica. Separar as listas de termos
+- [x] 4.4 **`dietary.catalog.ts` (613)**: é dado, não lógica. Separar as listas de termos
       (`MEAT`, `FISH`, `DAIRY`, `PORK`, `ALCOHOL`...) em `dietary/catalog/terms/*.ts` por grupo e
       deixar em `catalog/restrictions.ts` só o `RESTRICTIONS` que as combina. Fica fácil revisar e
       adicionar termos sem rolar 600 linhas.
-- [ ] 4.5 **`price-tools.ts` (330)**: `price-facts.ts` (leitura dos resultados: `walk`, `feesOf`,
+- [x] 4.5 **`price-tools.ts` (330)**: `price-facts.ts` (leitura dos resultados: `walk`, `feesOf`,
       `priceFacts`) e `compare-prices.ts` (resolução das opções e ranking). A definição da
       ferramenta vai para `price.source.ts` na fase 1.
-- [ ] 4.6 **`images.ts` (287)**: `image-trust.ts` (`isTrustedImageUrl`, `resolve`),
+- [x] 4.6 **`images.ts` (287)**: `image-trust.ts` (`isTrustedImageUrl`, `resolve`),
       `image-captions.ts` (`priceLabel`, `deliveryLabel`, captions) e `images.ts` com
       `imageCatalog` e `takeImages`. O `brl()` local some em favor do `formatBRL` de `money.ts`.
-- [ ] 4.7 **`cart-sync.ts` (224)**: `parseCart` e os leitores tolerantes (`findCart`, `money`,
+- [x] 4.7 **`cart-sync.ts` (224)**: `parseCart` e os leitores tolerantes (`findCart`, `money`,
       `pick`) para `cart-parser.ts`; o resto vira o hook `cart-sync.hook.ts` da fase 1.
-- [ ] 4.8 **`payment-events.consumer.ts` (304)**: o laço de conexão e reconexão com o RabbitMQ
+- [x] 4.8 **`payment-events.consumer.ts` (304)**: o laço de conexão e reconexão com o RabbitMQ
       (`run`, `connect`, `cleanup`, `sleep`, `inFlight`) para `rabbit-connection.ts`, reaproveitável
       e testável sozinho; `parseEvent` para `payment-event.parser.ts`; o consumer fica com `handle`
       e `fail` (ack, retry, dead letter).
-- [ ] 4.9 **`system-prompt.ts`**: quebrar o texto em seções nomeadas (`ORDER_RULES`, `TOOLS`,
+- [x] 4.9 **`system-prompt.ts`**: quebrar o texto em seções nomeadas (`ORDER_RULES`, `TOOLS`,
       `ECONOMY`, `PHOTOS`, `SECURITY`, `STYLE`) num array juntado com `\n\n`. O prompt final continua
       byte a byte igual (um spec compara com um snapshot, para não invalidar o cache sem querer), mas
       cada regra fica fácil de achar e de testar no eval.
-- [ ] 4.10 **Regras de coesão de módulo**: cada módulo exporta só pelo `*.module.ts` e por um
+- [x] 4.10 **Regras de coesão de módulo**: cada módulo exporta só pelo `*.module.ts` e por um
       `index.ts` com os tipos públicos; `agent/` não importa arquivos internos de `group-order/` e
       `dietary/` (só o que for exportado). Hoje `agent.service.ts` importa `group-order.errors`,
       `money`, `dietary.tools` e `schema` diretamente.
-- [ ] 4.11 Ligar `max-lines` no `.oxlintrc.json` como `warn` (ex.: 400 linhas, ignorando
+- [x] 4.11 Ligar `max-lines` no `.oxlintrc.json` como `warn` (ex.: 400 linhas, ignorando
       `*.spec.ts`, `eval/` e o catálogo) para o problema não voltar. Conferir se a versão do oxlint
       em uso suporta a regra.
 

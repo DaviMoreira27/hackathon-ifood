@@ -195,7 +195,8 @@ export function unseenIds(
 
 // Valores de campos "...Id" num texto: em JSON ("cartId": "abc", "id": 12) e no formato do estado
 // do pedido (cartId abc, cartItemId xyz). Alimenta o registro de ids do chat.
-const JSON_ID = /"([A-Za-z_]*)"\s*:\s*(?:"([^"\\]{1,200})"|(-?\d{1,30})(?![\d.]))/g;
+const JSON_ID =
+  /"([A-Za-z_]*)"\s*:\s*(?:"([^"\\]{1,200})"|(-?\d{1,30})(?![\d.]))/g;
 const TEXT_ID = /\b([a-z][A-Za-z]*Id)\s+([^\s,;()]{1,200})/g;
 
 export function idsInText(text: string): string[] {

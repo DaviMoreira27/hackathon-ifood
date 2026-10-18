@@ -1,10 +1,6 @@
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages.js';
-import {
-  extractImages,
-  imageCatalog,
-  isTrustedImageUrl,
-  takeImages,
-} from './images.js';
+import { isTrustedImageUrl } from './image-trust.js';
+import { extractImages, imageCatalog, takeImages } from './images.js';
 import { resetAppConfig } from '../config/app-config.js';
 import { wrapToolResult } from './tool-envelope.js';
 

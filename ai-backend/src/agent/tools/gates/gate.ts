@@ -1,4 +1,4 @@
-import type { Preparation } from '../../../group-order/group-order.tools.js';
+import type { Preparation } from '../../../group-order/index.js';
 import type { TurnContext } from '../../turn/turn-context.js';
 import type { ToolCall, ToolHandler } from '../tool-handler.js';
 

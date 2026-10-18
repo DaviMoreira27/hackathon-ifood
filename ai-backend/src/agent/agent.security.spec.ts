@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { AuthService } from '../auth/auth.service.js';
-import type { GroupOrderTools } from '../group-order/group-order.tools.js';
-import type { DietaryTools } from '../dietary/dietary.tools.js';
+import type { GroupOrderTools } from '../group-order/index.js';
+import type { DietaryTools } from '../dietary/index.js';
 import type { McpService } from '../mcp/mcp.service.js';
 import {
   type Message,

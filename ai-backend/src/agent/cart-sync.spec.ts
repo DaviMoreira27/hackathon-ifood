@@ -1,10 +1,10 @@
 import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
+import { parseCart } from './cart-parser.js';
 import {
   cartIdOf,
   getCartArgs,
-  parseCart,
   triggersCartSync,
-} from './cart-sync.js';
+} from './tools/hooks/cart-sync.hook.js';
 import { wrapToolResult } from './tool-envelope.js';
 import { resetAppConfig } from '../config/app-config.js';
 

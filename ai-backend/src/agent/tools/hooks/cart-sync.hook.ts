@@ -1,12 +1,84 @@
 import type { Logger } from '@nestjs/common';
-import { GroupOrderError } from '../../../group-order/group-order.errors.js';
-import type { GroupOrderTools } from '../../../group-order/group-order.tools.js';
-import { formatBRL, toCents } from '../../../group-order/money.js';
+import {
+  GroupOrderError,
+  type GroupOrderTools,
+  formatBRL,
+  toCents,
+} from '../../../group-order/index.js';
 import type { McpService } from '../../../mcp/mcp.service.js';
-import { cartIdOf, GET_CART, getCartArgs, parseCart } from '../../cart-sync.js';
+import { parseCart, parseJson } from '../../cart-parser.js';
+import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
+import { isObj } from '../../../common/json.js';
+import { appConfig } from '../../../config/app-config.js';
 import { wrapToolResult } from '../../tool-envelope.js';
 import type { TurnContext } from '../../turn/turn-context.js';
 import type { ToolCall } from '../tool-handler.js';
+
+// Sync automático do carrinho: depois de cada alteração bem-sucedida num carrinho do iFood, o
+// código lê o carrinho (getCart) e registra no pedido em grupo os itens, preços, subtotal e total
+// exatamente como o iFood devolveu. O LLM nunca transcreve número que vira cobrança. O resultado
+// do getCart é lido por cart-parser.ts; se algo não fecha, o LLM é mandado usar group_sync_cart.
+
+export const GET_CART = 'getCart';
+
+// MCP_CART_SYNC_TOOLS (nomes separados por vírgula) substitui a lista padrão.
+export function triggersCartSync(
+  name: string,
+  tools: string[] = appConfig().mcp.cartSyncTools,
+): boolean {
+  return tools.includes(name);
+}
+
+const CART_ID_KEYS = ['cartId', 'cart_id', 'ifoodCartId'];
+
+function findCartId(value: unknown, depth = 0): string | null {
+  if (depth > 6) return null;
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      const found = findCartId(v, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!isObj(value)) return null;
+  for (const key of CART_ID_KEYS) {
+    const v = value[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'number') return String(v);
+  }
+  if (isObj(value.cart) && typeof value.cart.id === 'string') {
+    return value.cart.id;
+  }
+  for (const v of Object.values(value)) {
+    const found = findCartId(v, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+// O carrinho alterado: primeiro o argumento da chamada, depois o resultado da ferramenta.
+export function cartIdOf(input: unknown, output: string): string | null {
+  return findCartId(input) ?? findCartId(parseJson(output));
+}
+
+// Argumentos do getCart a partir do schema anunciado pelo MCP. null = não dá para saber.
+export function getCartArgs(
+  tools: Tool[],
+  cartId: string,
+): Record<string, string> | null {
+  const tool = tools.find((t) => t.name === GET_CART);
+  if (!tool) return null;
+  const schema = tool.input_schema as {
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  const props = Object.keys(schema.properties ?? {});
+  const key =
+    CART_ID_KEYS.find((k) => props.includes(k)) ??
+    (schema.required?.length === 1 ? schema.required[0] : undefined) ??
+    (props.length === 1 ? props[0] : undefined);
+  return key ? { [key]: cartId } : null;
+}
 
 export interface CartWrite {
   call: ToolCall;
