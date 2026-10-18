@@ -49,7 +49,11 @@ const HISTORY_TOOL_RESULT_CHARS = 4000;
 // em vez de enfileirar mais chamadas ao LLM (custo) e ao MCP.
 const MAX_QUEUED_PER_CHAT = 3;
 const CONFIRM_TTL_MS = 5 * 60 * 1000;
-const CONFIRM_COMMAND = '/confirmar';
+// O usuário confirma digitando "confirmar" (a barra é opcional). Só vale a mensagem inteira: uma
+// frase como "pode confirmar" não conta, e o texto de um resultado de ferramenta nunca chega aqui.
+const CONFIRM_PATTERN = /^\/?confirmar[.!\s]*$/i;
+const NOTHING_PENDING_REPLY =
+  'Não há nenhuma ação aguardando confirmação (ou ela expirou). Peça de novo, por favor.';
 
 const FALLBACK_REPLY = 'Desculpe, ocorreu um erro interno. Tente novamente.';
 const BUSY_REPLY =
@@ -57,7 +61,7 @@ const BUSY_REPLY =
 // O link de login tem um state de uso único: o que fica no histórico é só um marcador.
 const LOGIN_MARKER = '[link de login do iFood enviado]';
 const BLOCKED_RESULT =
-  'BLOQUEADO: esta ação exige confirmação explícita do usuário. O sistema já mostrou os detalhes e pediu que ele responda /confirmar. Não chame a ferramenta de novo; explique o que vai acontecer e aguarde.';
+  'BLOQUEADO: esta ação exige confirmação explícita do usuário. O sistema já anexa à sua resposta o pedido de confirmação (o usuário responde "confirmar"). Não chame a ferramenta de novo, não repita a instrução de confirmação nem cite nomes de ferramentas ou ids; explique em linguagem simples o que vai acontecer e aguarde.';
 const ALREADY_PENDING_RESULT =
   'BLOQUEADO: já existe outra ação aguardando confirmação do usuário neste turno. Uma ação sensível por vez.';
 
@@ -179,11 +183,13 @@ export class AgentService {
     }
 
     let confirmed: PendingAction | undefined;
-    if (command === CONFIRM_COMMAND) {
-      if (!pending || pending.expiresAt < Date.now()) {
-        return 'Não há nenhuma ação aguardando confirmação (ou ela expirou). Peça de novo, por favor.';
+    if (CONFIRM_PATTERN.test(command)) {
+      if (pending && pending.expiresAt >= Date.now()) {
+        confirmed = pending;
+      } else if (pending || command.startsWith('/')) {
+        return NOTHING_PENDING_REPLY;
       }
-      confirmed = pending;
+      // "confirmar" sem nada pendente e sem barra é conversa normal: segue para o LLM.
     }
 
     const user = await this.users.getOrCreateByTelegram(chatId, profile?.name);
@@ -651,17 +657,16 @@ export class AgentService {
   ): string {
     if (!state.pending) return reply;
     this.pendingActions.set(chatId, state.pending);
-    let details = JSON.stringify(state.pending.input, null, 2);
-    if (details.length > 1500) details = `${details.slice(0, 1500)}\n…`;
     return [
       reply,
       '',
-      '⚠️ **Confirmação necessária**',
-      `Ação: \`${state.pending.name}\``,
-      ...(state.pending.summary
-        ? [state.pending.summary]
-        : ['```', details, '```']),
-      `Responda ${CONFIRM_COMMAND} em até 5 minutos para executar exatamente isso. Qualquer outra mensagem cancela.`,
+      // Nome da ferramenta e argumentos ficam só nos logs: quem lê é uma pessoa.
+      state.pending.summary
+        ? '⚠️ **Confirmação necessária:**'
+        : '⚠️ **Confirmação necessária**',
+      ...(state.pending.summary ? [state.pending.summary] : []),
+      '',
+      'Responda **confirmar** em até 5 minutos para seguir. Qualquer outra mensagem cancela.',
     ].join('\n');
   }
 

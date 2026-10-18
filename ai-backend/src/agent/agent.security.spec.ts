@@ -129,8 +129,10 @@ describe('AgentService — segurança', () => {
       expect(mcp.callTool).not.toHaveBeenCalled();
       expect(reply).toContain('Vou fechar o pedido');
       expect(reply).toContain('Confirmação necessária');
-      expect(reply).toContain('checkout_cart');
-      expect(reply).toContain('"cartId": "c1"');
+      // Texto para humanos: sem nome de ferramenta nem JSON dos argumentos.
+      expect(reply).toContain('Responda **confirmar**');
+      expect(reply).not.toContain('checkout_cart');
+      expect(reply).not.toContain('cartId');
       const blocked = lastSent(1);
       expect(blocked).toMatchObject({ tool_use_id: 'tu1', is_error: true });
       expect(blocked.content).toContain('BLOQUEADO');
@@ -164,6 +166,45 @@ describe('AgentService — segurança', () => {
       const reply = await agent.handle(CHAT, '/confirmar');
 
       expect(reply).toContain('Não há nenhuma ação aguardando');
+      expect(mcp.callTool).not.toHaveBeenCalled();
+    });
+
+    it('"confirmar" sem a barra (e com pontuação ou maiúscula) também confirma', async () => {
+      for (const word of ['confirmar', 'Confirmar!', ' CONFIRMAR. ']) {
+        mcp.callTool.mockClear();
+        create.mockReset();
+        create
+          .mockResolvedValueOnce(
+            toolUseReply('tu1', 'checkout_cart', { cartId: 'c1' }),
+          )
+          .mockResolvedValueOnce(textReply('Vou fechar o pedido'))
+          .mockResolvedValueOnce(textReply('Pedido feito!'));
+        await agent.handle(CHAT, 'fecha o pedido');
+
+        expect(await agent.handle(CHAT, word)).toBe('Pedido feito!');
+        expect(mcp.callTool).toHaveBeenCalledWith(session, 'checkout_cart', {
+          cartId: 'c1',
+        });
+      }
+    });
+
+    it('uma frase que só contém a palavra ("pode confirmar") não confirma', async () => {
+      await agent.handle(CHAT, 'fecha o pedido');
+      create.mockResolvedValueOnce(textReply('ok, me diga quando'));
+
+      await agent.handle(CHAT, 'pode confirmar');
+
+      expect(mcp.callTool).not.toHaveBeenCalled();
+    });
+
+    it('"confirmar" sem nada pendente segue como conversa normal, mas "/confirmar" avisa', async () => {
+      create.mockReset();
+      create.mockResolvedValueOnce(textReply('Confirmar o quê?'));
+
+      expect(await agent.handle(CHAT, 'confirmar')).toBe('Confirmar o quê?');
+      expect(await agent.handle(CHAT, '/confirmar')).toContain(
+        'Não há nenhuma ação aguardando',
+      );
       expect(mcp.callTool).not.toHaveBeenCalled();
     });
 

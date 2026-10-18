@@ -403,7 +403,8 @@ describe('AgentService', () => {
         expect(reply).toContain('Vou gerar as cobranças.');
         expect(reply).toContain('Confirmação necessária');
         expect(reply).toContain('• Ana — R$ 33,75 (Pizzaria)');
-        expect(reply).toContain('/confirmar');
+        expect(reply).toContain('Responda **confirmar**');
+        expect(reply).not.toContain('group_confirm_order');
         expect(reply).not.toContain('{}'); // nada do JSON vazio dos argumentos
         expect(sent[1].at(-1)!.content[0]).toMatchObject({
           is_error: true,
@@ -562,7 +563,7 @@ describe('AgentService', () => {
       const first = await agent.handle(CHAT, 'adiciona a pizza');
       expect(mcp.callTool).not.toHaveBeenCalled();
       expect(first).toContain('cita "mussarela"');
-      expect(first).toContain('/confirmar');
+      expect(first).toContain('Responda **confirmar**');
 
       await agent.handle(CHAT, '/confirmar');
       expect(mcp.callTool).toHaveBeenCalledWith(session, 'addItemToCart', {
