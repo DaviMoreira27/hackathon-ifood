@@ -10,7 +10,10 @@ import type {
 import type { GroupOrderTools } from '../group-order/group-order.tools.js';
 import type { DietaryTools } from '../dietary/dietary.tools.js';
 import type { UsersService } from '../users/users.service.js';
+import { DEFAULT_AGENT_CONFIG } from './agent.config.js';
 import { AgentService } from './agent.service.js';
+import type { TurnTracesService } from './turn-traces.service.js';
+import { messagesToRows } from './history.js';
 import { wrapToolResult } from './tool-policy.js';
 
 // MessagesService em memória, com a mesma semântica de ordem/janela do real.
@@ -33,6 +36,36 @@ class FakeMessages {
   clearChat = async (chatId: number) => {
     this.rows = this.rows.filter((r) => r.chatId !== chatId);
   };
+}
+
+// Histórico de uma conversa anterior em que uma ferramenta devolveu `result` (ids "vistos").
+async function seedToolResult(
+  db: FakeMessages,
+  chatId: number,
+  result: string,
+) {
+  await db.addMany([
+    { chatId, userId: 7, role: 'user', content: 'oi' },
+    ...messagesToRows(chatId, 7, [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'seed1', name: 'getItem', input: {} },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'seed1',
+            content: wrapToolResult('getItem', result),
+          },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    ]),
+  ]);
 }
 
 const textReply = (text: string) => ({
@@ -61,6 +94,7 @@ describe('AgentService', () => {
   let users: Record<string, ReturnType<typeof vi.fn>>;
   let groupTools: Record<string, ReturnType<typeof vi.fn>>;
   let dietTools: Record<string, ReturnType<typeof vi.fn>>;
+  let traces: Record<string, ReturnType<typeof vi.fn>>;
   let db: FakeMessages;
   let agent: AgentService;
 
@@ -103,7 +137,12 @@ describe('AgentService', () => {
       checkMcpCall: vi.fn().mockResolvedValue(null),
       execute: vi.fn(),
       prepare: vi.fn().mockResolvedValue({ kind: 'run' }),
+      orderView: vi
+        .fn()
+        .mockResolvedValue({ order: null, awaiting_finalization: [] }),
+      syncIfoodCart: vi.fn(),
     };
+    traces = { record: vi.fn() };
     dietTools = {
       has: vi.fn((name: string) => name.startsWith('diet_')),
       list: vi.fn().mockResolvedValue([]),
@@ -119,6 +158,8 @@ describe('AgentService', () => {
       db as unknown as MessagesService,
       groupTools as unknown as GroupOrderTools,
       dietTools as unknown as DietaryTools,
+      traces as unknown as TurnTracesService,
+      DEFAULT_AGENT_CONFIG,
     );
   });
 
@@ -179,7 +220,7 @@ describe('AgentService', () => {
         toolUseReply('tu1', 'search_offers', { q: 'pizza' }),
       )
       .mockResolvedValueOnce(textReply('Achei a loja A'))
-      .mockResolvedValueOnce(textReply('Adicionei'));
+      .mockResolvedValueOnce(textReply('Qual tamanho?'));
     mcp.callTool.mockResolvedValue({ text: '{"id":"item-9"}', isError: false });
 
     await agent.handle(CHAT, 'quero uma pizza');
@@ -199,11 +240,12 @@ describe('AgentService', () => {
       tool_use_id: 'tu1',
       content: wrapToolResult('search_offers', '{"id":"item-9"}'),
     });
-    // A última mensagem vai como bloco com cache_control (prompt caching).
+    // A última mensagem leva o estado do pedido (só na chamada) e o cache_control no último bloco.
     expect(third[4].content).toEqual([
+      { type: 'text', text: 'adiciona a primeira' },
       {
         type: 'text',
-        text: 'adiciona a primeira',
+        text: expect.stringContaining('Nenhum pedido em grupo em andamento'),
         cache_control: { type: 'ephemeral' },
       },
     ]);
@@ -366,6 +408,7 @@ describe('AgentService', () => {
       groupTools.checkMcpCall.mockResolvedValue(
         'Checkout bloqueado: o pedido ainda não foi totalmente pago.',
       );
+      await seedToolResult(db, CHAT, '{"cartId":"c1"}');
 
       await agent.handle(CHAT, 'finaliza');
 
@@ -559,6 +602,7 @@ describe('AgentService', () => {
         )
         .mockResolvedValueOnce(textReply('preciso da sua confirmação'))
         .mockResolvedValueOnce(textReply('adicionei'));
+      await seedToolResult(db, CHAT, '{"itemId":"p1"}');
 
       const first = await agent.handle(CHAT, 'adiciona a pizza');
       expect(mcp.callTool).not.toHaveBeenCalled();
@@ -582,6 +626,7 @@ describe('AgentService', () => {
           toolUseReply('a1', 'addItemToCart', { itemId: 'p1' }),
         )
         .mockResolvedValueOnce(textReply('vou conferir'));
+      await seedToolResult(db, CHAT, '{"itemId":"p1"}');
 
       await agent.handle(CHAT, 'adiciona');
 
@@ -591,6 +636,296 @@ describe('AgentService', () => {
         is_error: true,
         content: 'confira com diet_check_items',
       });
+    });
+  });
+
+  describe('robustez', () => {
+    it('usa modelo e effort da configuração e manda as ferramentas locais com strict', async () => {
+      create.mockResolvedValue(textReply('ok'));
+
+      await agent.handle(CHAT, 'oi');
+
+      const params = create.mock.calls[0][0] as {
+        output_config: unknown;
+        tools: Array<{ name: string; strict?: boolean }>;
+      };
+      expect(params).toMatchObject({
+        model: DEFAULT_AGENT_CONFIG.model,
+        max_tokens: DEFAULT_AGENT_CONFIG.maxTokens,
+      });
+      expect(params.output_config).toEqual({
+        effort: DEFAULT_AGENT_CONFIG.effort,
+      });
+      const byName = new Map(params.tools.map((t) => [t.name, t]));
+      expect(byName.get('group_x')?.strict).toBe(true);
+      expect(byName.get('compare_prices')?.strict).toBe(true);
+      expect(byName.get('diet_check_items')?.strict).toBe(true);
+      expect(byName.get('search_offers')?.strict).toBeUndefined();
+    });
+
+    it('recusa do modelo vira mensagem própria, sem executar nada', async () => {
+      create.mockResolvedValue({
+        stop_reason: 'refusal',
+        stop_details: { type: 'refusal', category: 'cyber' },
+        content: [
+          { type: 'tool_use', id: 'x', name: 'checkout_cart', input: {} },
+        ],
+      });
+
+      const reply = await agent.handle(CHAT, 'oi');
+
+      expect(reply).toContain('Não posso ajudar com esse pedido');
+      expect(mcp.callTool).not.toHaveBeenCalled();
+      expect(db.rows.at(-1)).toMatchObject({
+        role: 'assistant',
+        payload: null,
+      });
+      expect(traces.record).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'refusal' }),
+      );
+    });
+
+    describe('sync automático do carrinho', () => {
+      const CART = JSON.stringify({
+        cartId: 'c1',
+        merchantName: 'Pizzaria',
+        items: [
+          {
+            cartItemId: 'ci1',
+            itemName: 'Pizza G',
+            unitPrice: 40,
+            quantity: 1,
+          },
+        ],
+        subtotal: 40,
+        total: 47.9,
+      });
+
+      beforeEach(async () => {
+        session.tools.push({ name: 'addItemToCart' }, {
+          name: 'getCart',
+          input_schema: {
+            type: 'object',
+            properties: { cartId: { type: 'string' } },
+          },
+        } as { name: string });
+        await seedToolResult(db, CHAT, '{"cartId":"c1","itemId":"i1"}');
+        create
+          .mockResolvedValueOnce(
+            toolUseReply('a1', 'addItemToCart', { cartId: 'c1', itemId: 'i1' }),
+          )
+          .mockResolvedValueOnce(textReply('Adicionei a pizza.'));
+      });
+
+      it('lê o carrinho e registra no pedido os números do iFood, não os do LLM', async () => {
+        mcp.callTool.mockImplementation(async (_s: unknown, name: string) =>
+          name === 'getCart'
+            ? { text: CART, isError: false }
+            : { text: '{"ok":true}', isError: false },
+        );
+        groupTools.syncIfoodCart.mockResolvedValue({ ifood_cart_id: 'c1' });
+        groupTools.orderView
+          .mockResolvedValueOnce({ order: null, awaiting_finalization: [] })
+          .mockResolvedValueOnce({
+            order: { id: 1, status: 'collecting' },
+            carts: [
+              {
+                ifood_cart_id: 'c1',
+                restaurant: 'Pizzaria',
+                status: 'pending',
+                subtotal: 'R$ 40,00',
+                total: 'R$ 47,90',
+                items: [
+                  {
+                    item_id: 'ci1',
+                    name: 'Pizza G',
+                    unit_price: 'R$ 40,00',
+                    quantity: 1,
+                    payer: null,
+                  },
+                ],
+                payers: [],
+              },
+            ],
+            awaiting_finalization: [],
+          });
+
+        const reply = await agent.handle(CHAT, 'adiciona a pizza');
+
+        expect(mcp.callTool).toHaveBeenCalledWith(session, 'getCart', {
+          cartId: 'c1',
+        });
+        expect(groupTools.syncIfoodCart).toHaveBeenCalledWith(
+          { chatId: CHAT, userId: 7 },
+          {
+            ifoodCartId: 'c1',
+            restaurantName: 'Pizzaria',
+            subtotal: 40,
+            total: 47.9,
+            items: [
+              { itemId: 'ci1', name: 'Pizza G', unitPrice: 40, quantity: 1 },
+            ],
+          },
+        );
+        const result = sent[1].at(-1)!.content[0];
+        expect(result.content).toContain('sincronizado automaticamente');
+        expect(result.content).toContain('total R$ 47,90');
+        expect(reply).toBe(
+          'Adicionei a pizza.\n\n🧾 **Seu pedido**\n**Pizzaria** — total R$ 47,90\n• 1x Pizza G — R$ 40,00',
+        );
+      });
+
+      it('se não reconhece o getCart, manda o LLM usar group_sync_cart', async () => {
+        mcp.callTool.mockImplementation(async (_s: unknown, name: string) =>
+          name === 'getCart'
+            ? { text: '{"formato":"desconhecido"}', isError: false }
+            : { text: '{"ok":true}', isError: false },
+        );
+
+        const reply = await agent.handle(CHAT, 'adiciona a pizza');
+
+        expect(groupTools.syncIfoodCart).not.toHaveBeenCalled();
+        const result = sent[1].at(-1)!.content[0];
+        expect(result.is_error).toBe(false);
+        expect(result.content).toContain('group_sync_cart');
+        expect(reply).toBe('Adicionei a pizza.');
+      });
+    });
+
+    describe('validador da resposta final', () => {
+      beforeEach(() => {
+        mcp.callTool.mockResolvedValue({
+          text: '{"itemName":"Pizza","unitPrice":42.9}',
+          isError: false,
+        });
+      });
+
+      it('valor sem origem volta ao modelo uma vez para correção', async () => {
+        create
+          .mockResolvedValueOnce(
+            toolUseReply('t1', 'search_offers', { q: 'p' }),
+          )
+          .mockResolvedValueOnce(textReply('Pizza R$ 42,90, entrega R$ 5,00'))
+          .mockResolvedValueOnce(textReply('Pizza R$ 42,90'));
+
+        const reply = await agent.handle(CHAT, 'pizza');
+
+        expect(reply).toBe('Pizza R$ 42,90');
+        const correction = sent[2].at(-1)!.content[0].text as string;
+        expect(correction).toContain('R$ 5,00');
+        expect(correction).not.toContain('R$ 42,90');
+        expect(correction).toContain('não mencione esta verificação');
+        // Rascunho rejeitado e nota de correção não vão para o histórico.
+        const saved = JSON.stringify(db.rows);
+        expect(saved).not.toContain('verificação automática');
+        expect(saved).not.toContain('entrega R$ 5,00');
+        expect(db.rows.at(-1)).toMatchObject({
+          role: 'assistant',
+          content: 'Pizza R$ 42,90',
+        });
+        expect(traces.record).toHaveBeenCalledWith(
+          expect.objectContaining({ validatorHits: ['valor:R$ 5,00'] }),
+        );
+      });
+
+      it('se o valor persistir, ele sai da resposta', async () => {
+        create
+          .mockResolvedValueOnce(
+            toolUseReply('t1', 'search_offers', { q: 'p' }),
+          )
+          .mockResolvedValue(textReply('Pizza R$ 42,90, entrega R$ 5,00'));
+
+        const reply = await agent.handle(CHAT, 'pizza');
+
+        expect(create).toHaveBeenCalledTimes(3);
+        expect(reply).toBe('Pizza R$ 42,90, entrega (valor a confirmar)');
+      });
+
+      it('"adicionei" sem addItemToCart no turno volta ao modelo', async () => {
+        create
+          .mockResolvedValueOnce(textReply('Adicionei a pizza!'))
+          .mockResolvedValueOnce(textReply('Quer que eu adicione a pizza?'));
+
+        const reply = await agent.handle(CHAT, 'pizza');
+
+        expect(reply).toBe('Quer que eu adicione a pizza?');
+        expect(sent[1].at(-1)!.content[0].text).toContain('adicionar item');
+      });
+    });
+
+    it('resposta sem texto é pedida de novo uma vez, em vez de virar erro interno', async () => {
+      create
+        .mockResolvedValueOnce({ stop_reason: 'end_turn', content: [] })
+        .mockResolvedValueOnce(textReply('Aqui está.'));
+
+      const reply = await agent.handle(CHAT, 'pizza');
+
+      expect(reply).toBe('Aqui está.');
+      expect(sent[1].at(-1)!.content[0].text).toContain('sem texto');
+      expect(traces.record).toHaveBeenCalledWith(
+        expect.objectContaining({ validatorHits: ['vazia:end_turn'] }),
+      );
+    });
+
+    it('o nome do perfil do Telegram vai no estado do pedido', async () => {
+      create.mockResolvedValue(textReply('ok'));
+
+      await agent.handle(CHAT, 'oi', { name: 'Davi' });
+
+      expect(sent[0].at(-1)!.content.at(-1).text).toContain(
+        'Dono da conversa: Davi',
+      );
+    });
+
+    it('escrita com id que nunca apareceu é recusada antes do MCP', async () => {
+      create
+        .mockResolvedValueOnce(
+          toolUseReply('t1', 'checkout_cart', { cartId: 'inventado' }),
+        )
+        .mockResolvedValueOnce(textReply('vou consultar'));
+
+      await agent.handle(CHAT, 'finaliza');
+
+      expect(mcp.callTool).not.toHaveBeenCalled();
+      expect(groupTools.checkMcpCall).not.toHaveBeenCalled();
+      expect(sent[1].at(-1)!.content[0]).toMatchObject({
+        is_error: true,
+        content: expect.stringContaining('cartId=inventado'),
+      });
+    });
+
+    it('grava o trace do turno com ferramentas, rodadas e tokens', async () => {
+      mcp.callTool.mockResolvedValue({ text: '[]', isError: false });
+      create
+        .mockResolvedValueOnce({
+          ...toolUseReply('t1', 'search_offers', { q: 'p' }),
+          usage: { input_tokens: 100, output_tokens: 10 },
+        })
+        .mockResolvedValueOnce({
+          ...textReply('nada'),
+          usage: {
+            input_tokens: 120,
+            output_tokens: 5,
+            cache_read_input_tokens: 90,
+          },
+        });
+
+      await agent.handle(CHAT, 'pizza');
+
+      expect(traces.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: CHAT,
+          userId: 7,
+          outcome: 'reply',
+          rounds: 2,
+          inputTokens: 220,
+          outputTokens: 15,
+          cacheReadTokens: 90,
+          tools: [{ name: 'search_offers', ok: true, ms: expect.any(Number) }],
+          validatorHits: [],
+          error: null,
+        }),
+      );
     });
   });
 });

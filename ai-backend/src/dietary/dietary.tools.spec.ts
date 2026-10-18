@@ -96,6 +96,38 @@ describe('DietaryTools', () => {
     expect(res.text).toContain('Nenhuma restrição alimentar salva');
   });
 
+  it('recusa person que não é um nome (JSON vazado não vira pessoa sem restrição)', async () => {
+    await tools.execute(
+      DIET_SAVE,
+      { restrictions: [{ kind: 'lactose' }] },
+      CTX,
+    );
+    const res = await tools.execute(
+      DIET_CHECK,
+      {
+        items: [
+          {
+            item_id: 'i1',
+            name: 'Pizza Calabresa',
+            description: 'Molho, mussarela e calabresa.',
+            person: "você','restaurant':'Pizza Rápida",
+          },
+        ],
+      },
+      CTX,
+    );
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain('Campo "person" inválido');
+    const ok = await tools.execute(
+      DIET_CHECK,
+      {
+        items: [{ item_id: 'i1', name: 'Pizza', person: "Ana D'Ávila-Souza" }],
+      },
+      CTX,
+    );
+    expect(ok.isError).toBe(false);
+  });
+
   it('salva para o próprio usuário e para outra pessoa, e a política passa a listar', async () => {
     await tools.execute(DIET_SAVE, { restrictions: [{ kind: 'gluten' }] }, CTX);
     const res = await tools.execute(

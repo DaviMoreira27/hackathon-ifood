@@ -178,8 +178,22 @@ function requiredStr(input: Input, key: string, max: number): string {
   return value;
 }
 
-function parsePerson(input: Input): { key: string; name: string | null } {
+// Só um nome: o modelo já mandou JSON vazado no campo ("você','restaurant':'X"), o que virava uma
+// pessoa sem restrição e deixava passar item cortado para o dono.
+const PERSON_NAME = /^[\p{L}\p{M}][\p{L}\p{M}' .-]*$/u;
+
+function personStr(input: Input): string | undefined {
   const name = optionalStr(input, 'person', 60);
+  if (name !== undefined && !PERSON_NAME.test(name)) {
+    throw new GroupOrderError(
+      `Campo "person" inválido: ${JSON.stringify(name)}. Use só o nome da pessoa (ex.: "Ana") ou omita quando for o próprio usuário.`,
+    );
+  }
+  return name;
+}
+
+function parsePerson(input: Input): { key: string; name: string | null } {
+  const name = personStr(input);
   const key = personKeyOf(name);
   return { key, name: key === '' ? null : (name ?? null) };
 }
@@ -247,7 +261,7 @@ function parseItems(input: Input): CheckItem[] {
         typeof i.description === 'string'
           ? i.description.slice(0, 3000)
           : undefined,
-      person: optionalStr(i, 'person', 60),
+      person: personStr(i),
     };
   });
 }

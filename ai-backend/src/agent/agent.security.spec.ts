@@ -9,7 +9,9 @@ import type {
   NewMessage,
 } from '../messages/messages.service.js';
 import type { UsersService } from '../users/users.service.js';
+import { DEFAULT_AGENT_CONFIG } from './agent.config.js';
 import { AgentService } from './agent.service.js';
+import type { TurnTracesService } from './turn-traces.service.js';
 
 // Defesas do loop do agente contra prompt injection e problemas de integridade com o MCP.
 
@@ -83,6 +85,24 @@ describe('AgentService — segurança', () => {
       mergeTools: (tools: unknown[]) => tools,
       checkoutAllowed: vi.fn().mockResolvedValue(true),
       checkMcpCall: vi.fn().mockResolvedValue(null),
+      // O carrinho c1 está no estado do pedido injetado a cada turno: é um id "visto".
+      orderView: vi.fn().mockResolvedValue({
+        order: { id: 1, status: 'collecting' },
+        participants: [],
+        carts: [
+          {
+            ifood_cart_id: 'c1',
+            restaurant: 'Pizzaria',
+            status: 'pending',
+            subtotal: 'R$ 10,00',
+            total: 'R$ 12,00',
+            items: [],
+            payers: [],
+          },
+        ],
+        problems: [],
+        awaiting_finalization: [],
+      }),
     };
     db = new FakeMessages();
     agent = new AgentService(
@@ -111,6 +131,8 @@ describe('AgentService — segurança', () => {
         list: async () => [],
         prepareMcpCall: async () => ({ kind: 'run' }),
       } as unknown as DietaryTools,
+      { record: vi.fn() } as unknown as TurnTracesService,
+      DEFAULT_AGENT_CONFIG,
     );
   });
 
@@ -256,7 +278,9 @@ describe('AgentService — segurança', () => {
       new Error('ECONNRESET http://interno:3001 Bearer abc'),
     );
     create
-      .mockResolvedValueOnce(toolUseReply('tu1', 'add_to_cart', { id: 1 }))
+      .mockResolvedValueOnce(
+        toolUseReply('tu1', 'add_to_cart', { cartId: 'c1' }),
+      )
       .mockResolvedValueOnce(textReply('ok'));
 
     await agent.handle(CHAT, 'adiciona');
@@ -284,7 +308,9 @@ describe('AgentService — segurança', () => {
 
   it('se o LLM falhar no meio do turno, as ferramentas já executadas ficam no histórico', async () => {
     create
-      .mockResolvedValueOnce(toolUseReply('tu1', 'add_to_cart', { id: 1 }))
+      .mockResolvedValueOnce(
+        toolUseReply('tu1', 'add_to_cart', { cartId: 'c1' }),
+      )
       .mockRejectedValueOnce(new Error('529 overloaded'));
 
     await expect(agent.handle(CHAT, 'adiciona')).rejects.toThrow('529');
@@ -329,7 +355,9 @@ describe('AgentService — segurança', () => {
 
     it('envia só as fotos que vieram das ferramentas, fora do texto', async () => {
       mcp.callTool.mockResolvedValue({
-        text: JSON.stringify({ items: [{ name: 'Pizza', imageUrl: DISH }] }),
+        text: JSON.stringify({
+          items: [{ name: 'Pizza', imageUrl: DISH, price: 39.9 }],
+        }),
         isError: false,
       });
       create
@@ -346,22 +374,43 @@ describe('AgentService — segurança', () => {
       expect(reply.text).toBe('💰 **Pizza G** — R$ 39,90');
     });
 
-    it('compare_prices roda localmente, sem ir ao MCP', async () => {
+    it('compare_prices roda localmente, com os preços lidos das ferramentas', async () => {
+      mcp.callTool.mockResolvedValue({
+        text: JSON.stringify({
+          items: [
+            {
+              itemId: 'a1',
+              itemName: 'A',
+              unitPrice: 30,
+              merchantId: 'x',
+              merchantName: 'X',
+              deliveryMethod: { fee: 10 },
+            },
+            {
+              itemId: 'b1',
+              itemName: 'B',
+              unitPrice: 35,
+              merchantId: 'y',
+              merchantName: 'Y',
+              deliveryMethod: { fee: 0 },
+            },
+          ],
+        }),
+        isError: false,
+      });
       create
+        .mockResolvedValueOnce(toolUseReply('tu1', 'search', { q: 'x' }))
         .mockResolvedValueOnce(
-          toolUseReply('tu1', 'compare_prices', {
-            options: [
-              { label: 'A', restaurant: 'X', unit_price: 30, delivery_fee: 10 },
-              { label: 'B', restaurant: 'Y', unit_price: 35 },
-            ],
+          toolUseReply('tu2', 'compare_prices', {
+            options: [{ item_id: 'a1' }, { item_id: 'b1' }],
           }),
         )
         .mockResolvedValueOnce(textReply('ok'));
 
       await agent.handle(CHAT, 'qual é mais barato?');
 
-      expect(mcp.callTool).not.toHaveBeenCalled();
-      const result = lastSent(1);
+      expect(mcp.callTool).toHaveBeenCalledTimes(1);
+      const result = lastSent(2);
       expect(result.is_error).toBe(false);
       expect(result.content).toContain('1. B — Y: total R$ 35,00');
       expect(result.content).toContain('Mais em conta: B (Y).');
