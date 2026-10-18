@@ -7,6 +7,7 @@
 // faria o driver tentar localhost:5432 com o usuário do sistema.
 export const DEFAULT_DATABASE_URL =
   'postgresql://ifood:ifood@localhost:5433/ifood';
+export const DEFAULT_WHATSAPP_GRAPH_VERSION = 'v23.0';
 export const DEFAULT_CHECKOUT_TOOL_PATTERN = /submit_?order|checkout/i;
 export const DEFAULT_DIET_GUARDED_TOOL_PATTERN = /add_?(item_?)?to_?cart/i;
 export const DEFAULT_CART_SYNC_TOOLS = [
@@ -39,7 +40,15 @@ const DEFAULT_IFOOD_SCOPES = [
 export interface AppConfig {
   port: number;
   databaseUrl: string;
+  // Canais de chat: cada um só sobe quando configurado.
   telegramBotToken?: string;
+  whatsapp?: {
+    accessToken: string;
+    phoneNumberId: string;
+    verifyToken: string;
+    appSecret: string;
+    graphVersion: string;
+  };
   // Rota POST /telegram/send: sem chave, fica desligada.
   internalApiKey?: string;
   tokenEncryptionKey?: string;
@@ -135,10 +144,40 @@ export function loadAppConfig(
   const hosts = (key: string) =>
     list(read(env, key)).map((h) => h.toLowerCase());
 
+  // WhatsApp é opcional, mas pela metade não funciona: definida uma, as quatro são obrigatórias.
+  const whatsappKeys = [
+    'WHATSAPP_ACCESS_TOKEN',
+    'WHATSAPP_PHONE_NUMBER_ID',
+    'WHATSAPP_VERIFY_TOKEN',
+    'WHATSAPP_APP_SECRET',
+  ] as const;
+  const [waToken, waPhoneId, waVerify, waSecret] = whatsappKeys.map((key) =>
+    read(env, key),
+  );
+  const waMissing = whatsappKeys.filter((key) => read(env, key) === undefined);
+  if (waMissing.length && waMissing.length < whatsappKeys.length) {
+    errors.push(
+      `WhatsApp configurado pela metade: faltam ${waMissing.join(', ')}`,
+    );
+  }
+  const whatsapp =
+    waToken && waPhoneId && waVerify && waSecret
+      ? {
+          accessToken: waToken,
+          phoneNumberId: waPhoneId,
+          verifyToken: waVerify,
+          appSecret: waSecret,
+          graphVersion:
+            read(env, 'WHATSAPP_GRAPH_VERSION') ??
+            DEFAULT_WHATSAPP_GRAPH_VERSION,
+        }
+      : undefined;
+
   const config: AppConfig = {
     port: int('PORT', 3000, 1, 65535),
     databaseUrl: read(env, 'DATABASE_URL') ?? DEFAULT_DATABASE_URL,
     telegramBotToken: read(env, 'TELEGRAM_BOT_TOKEN'),
+    whatsapp,
     internalApiKey: read(env, 'INTERNAL_API_KEY'),
     tokenEncryptionKey: read(env, 'TOKEN_ENCRYPTION_KEY'),
     mcp: {

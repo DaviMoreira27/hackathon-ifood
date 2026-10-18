@@ -54,7 +54,7 @@ describe.skipIf(
     process.env.TOKEN_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString('base64');
     resetAppConfig();
     const module = await Test.createTestingModule({
-      imports: [AppModule],
+      imports: [AppModule.forRoot()],
     }).compile();
     app = module.createNestApplication();
     await app.init();
@@ -78,7 +78,7 @@ describe.skipIf(
       '/redirect?code=x&state=nao-existe',
     );
     expect(response.status).toBe(403);
-    expect(response.text).toContain('Mande uma nova mensagem no Telegram');
+    expect(response.text).toContain('Mande uma nova mensagem no chat');
   });
 
   it('pagamento confirmado avisa o dono no Telegram (service → listener → bot)', async () => {

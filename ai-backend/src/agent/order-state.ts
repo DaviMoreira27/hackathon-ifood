@@ -23,7 +23,7 @@ export function orderStateBlock(view: OrderView, ownerName?: string): string {
   const lines: string[] = [];
   if (ownerName) {
     lines.push(
-      `Dono da conversa: ${ownerName.replace(/\s+/g, ' ').trim().slice(0, 60)} (nome do perfil do Telegram)`,
+      `Dono da conversa: ${ownerName.replace(/\s+/g, ' ').trim().slice(0, 60)} (nome do perfil no app de mensagens)`,
     );
   }
   if (!view.order) {

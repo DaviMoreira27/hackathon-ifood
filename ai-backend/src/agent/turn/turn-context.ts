@@ -20,7 +20,7 @@ export interface PendingAction {
 export class TurnContext {
   readonly chatId: number;
   readonly userId: number;
-  // Nome do perfil do Telegram: o modelo usa como participante quando o dono pede para si.
+  // Nome do perfil no app de mensagens: o modelo usa como participante quando o dono pede para si.
   readonly ownerName?: string;
   // O que as ferramentas locais recebem (sem o resto do estado do turno).
   readonly tool: ToolContext;

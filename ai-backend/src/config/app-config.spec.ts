@@ -1,6 +1,7 @@
 import {
   DEFAULT_CART_SYNC_TOOLS,
   DEFAULT_CHECKOUT_TOOL_PATTERN,
+  DEFAULT_WHATSAPP_GRAPH_VERSION,
   loadAppConfig,
 } from './app-config.js';
 
@@ -56,5 +57,31 @@ describe('loadAppConfig', () => {
     ]) {
       expect(load, key).toThrow(key);
     }
+  });
+
+  it('WhatsApp completo liga o canal com a versão padrão da Graph API', () => {
+    const config = loadAppConfig({
+      WHATSAPP_ACCESS_TOKEN: 'tok',
+      WHATSAPP_PHONE_NUMBER_ID: '123',
+      WHATSAPP_VERIFY_TOKEN: 'verifica',
+      WHATSAPP_APP_SECRET: 'segredo',
+    });
+    expect(config.whatsapp).toEqual({
+      accessToken: 'tok',
+      phoneNumberId: '123',
+      verifyToken: 'verifica',
+      appSecret: 'segredo',
+      graphVersion: DEFAULT_WHATSAPP_GRAPH_VERSION,
+    });
+    expect(loadAppConfig({}).whatsapp).toBeUndefined();
+  });
+
+  it('WhatsApp pela metade derruba o boot dizendo o que falta', () => {
+    const load = () =>
+      loadAppConfig({
+        WHATSAPP_ACCESS_TOKEN: 'tok',
+        WHATSAPP_PHONE_NUMBER_ID: '123',
+      });
+    expect(load).toThrow('WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET');
   });
 });

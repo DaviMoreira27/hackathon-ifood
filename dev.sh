@@ -8,6 +8,7 @@
 #   ./dev.sh logs [serviço]  acompanha os logs (ai-backend | ifood-backend | frontend; sem argumento, todos)
 #   ./dev.sh restart         reinicia os backends e o front
 #   ./dev.sh reset --yes     APAGA containers e volumes (banco e filas) e recomeça do zero
+#   ./dev.sh tunnel          túnel HTTPS público para o ai-backend (webhook do WhatsApp; cloudflared ou ngrok)
 #
 # Variáveis opcionais: CONTAINER_ENGINE (docker|podman), AI_BACKEND_PORT (3000), MOCK_PORT (3001),
 # FRONT_PORT (5173). O front é o do pagador: o link de pagamento (PAYMENT_LINK_TEMPLATE) aponta para ele.
@@ -184,10 +185,18 @@ validate_env() {
   local env_file="$AI_DIR/.env"
   if [ ! -f "$env_file" ]; then
     cp "$AI_DIR/.env.example" "$env_file"
-    die "criei ai-backend/.env a partir do exemplo. Preencha TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, IFOOD_CLIENT_ID e IFOOD_CLIENT_SECRET e rode ./dev.sh up de novo."
+    die "criei ai-backend/.env a partir do exemplo. Preencha TELEGRAM_BOT_TOKEN (e/ou as WHATSAPP_*), ANTHROPIC_API_KEY, IFOOD_CLIENT_ID e IFOOD_CLIENT_SECRET e rode ./dev.sh up de novo."
   fi
-  is_placeholder "$(env_value TELEGRAM_BOT_TOKEN "$env_file")" &&
-    die "TELEGRAM_BOT_TOKEN não está definido em ai-backend/.env (o bot não sobe sem ele)."
+  # Cada canal só sobe se configurado; sem nenhum, o back não sobe.
+  local telegram_token whatsapp_token
+  telegram_token="$(env_value TELEGRAM_BOT_TOKEN "$env_file")"
+  whatsapp_token="$(env_value WHATSAPP_ACCESS_TOKEN "$env_file")"
+  if is_placeholder "$telegram_token" && is_placeholder "$whatsapp_token"; then
+    die "nenhum canal de chat definido em ai-backend/.env: preencha TELEGRAM_BOT_TOKEN e/ou as variáveis WHATSAPP_*."
+  fi
+  if [ -n "$telegram_token" ] && is_placeholder "$telegram_token"; then
+    die "TELEGRAM_BOT_TOKEN em ai-backend/.env ainda tem o valor de exemplo: preencha ou deixe vazio para subir sem o Telegram."
+  fi
   local key
   for key in ANTHROPIC_API_KEY IFOOD_CLIENT_ID IFOOD_CLIENT_SECRET; do
     if is_placeholder "$(env_value "$key" "$env_file")"; then
@@ -399,12 +408,12 @@ print_summary() {
   local template
   template="$(env_value PAYMENT_LINK_TEMPLATE "$AI_DIR/.env")"
   step "Tudo no ar"
-  say "  ai-backend      http://localhost:$(service_port ai-backend)  (Telegram, agente, OAuth, consumidor de eventos)"
+  say "  ai-backend      http://localhost:$(service_port ai-backend)  (Telegram/WhatsApp, agente, OAuth, consumidor de eventos)"
   say "  ifood-backend   http://localhost:$(service_port ifood-backend)  (mock do iFood: cobranças e eventos de pagamento)"
-  say "  frontend        http://localhost:$(service_port frontend)  (página de pagamento do link enviado no Telegram)"
+  say "  frontend        http://localhost:$(service_port frontend)  (página de pagamento do link enviado no chat)"
   say "  RabbitMQ        http://localhost:$RABBIT_UI_PORT  (painel; usuário ifood / senha ifood)"
   say "  Postgres        localhost:$PG_PORT  (usuário ifood / senha ifood / banco ifood)"
-  say "  link de pagamento enviado no Telegram: ${template:-http://localhost:5173/pay/{token}}"
+  say "  link de pagamento enviado no chat: ${template:-http://localhost:5173/pay/{token}}"
   say "${C_DIM}  logs: ./dev.sh logs    parar: ./dev.sh down    estado: ./dev.sh status${C_RESET}"
 }
 
@@ -476,6 +485,39 @@ cmd_restart() {
   start_service frontend
 }
 
+# Túnel HTTPS público para o ai-backend: o webhook do WhatsApp só aceita HTTPS alcançável pela Meta.
+# Fica em primeiro plano (Ctrl+C encerra). A URL do cloudflared muda a cada execução: recadastre.
+cmd_tunnel() {
+  local port url="" line
+  port="$(service_port ai-backend)"
+  port_in_use "$port" || warn "nada ouvindo na porta $port: rode ./dev.sh up (o túnel sobe mesmo assim)"
+  if command -v cloudflared >/dev/null 2>&1; then
+    step "Túnel HTTPS para http://localhost:$port com cloudflared (Ctrl+C encerra)"
+    cloudflared tunnel --no-autoupdate --url "http://localhost:$port" 2>&1 | while IFS= read -r line; do
+      printf '%s%s%s\n' "$C_DIM" "$line" "$C_RESET"
+      # api.trycloudflare.com só aparece em mensagens de erro, não é a URL do túnel.
+      if [ -z "$url" ] && [[ "$line" =~ (https://[a-z0-9-]+\.trycloudflare\.com) ]] &&
+        [ "${BASH_REMATCH[1]}" != "https://api.trycloudflare.com" ]; then
+        url="${BASH_REMATCH[1]}"
+        print_webhook_info "$url"
+      fi
+    done
+  elif command -v ngrok >/dev/null 2>&1; then
+    step "Túnel HTTPS para http://localhost:$port com ngrok (Ctrl+C encerra)"
+    print_webhook_info "<URL https mostrada pelo ngrok>"
+    exec ngrok http "$port"
+  else
+    die "instale o cloudflared (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) ou o ngrok"
+  fi
+}
+
+print_webhook_info() { # url pública
+  step "Cadastre no painel da Meta (WhatsApp → Configuração → Webhook)"
+  say "  URL de callback:       $1/whatsapp/webhook"
+  say "  Token de verificação:  o WHATSAPP_VERIFY_TOKEN do ai-backend/.env"
+  say "  Campo assinado:        messages"
+}
+
 cmd_reset() {
   [ "${1:-}" = "--yes" ] || die "reset APAGA containers e volumes (banco e filas). Rode ./dev.sh reset --yes se é isso mesmo."
   detect_engine
@@ -502,6 +544,7 @@ main() {
     logs) cmd_logs "${2:-}" ;;
     restart) cmd_restart ;;
     reset) cmd_reset "${2:-}" ;;
+    tunnel) cmd_tunnel ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 2 ;;
   esac

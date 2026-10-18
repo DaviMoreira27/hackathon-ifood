@@ -58,13 +58,13 @@ export class AuthController {
     try {
       const chatId = await this.authService.handleCallback(code, state);
       this.logger.log(`[redirect] login concluído para o chat ${chatId}`);
-      return page('Login feito ✅ Pode voltar ao Telegram.');
+      return page('Login feito ✅ Pode voltar à conversa.');
     } catch (err) {
       this.logger.error(`[redirect] falha no login: ${String(err)}`);
       res.status(err instanceof HttpException ? err.getStatus() : 500);
       return page(
         err instanceof HttpException
-          ? `${err.message} Mande uma nova mensagem no Telegram para receber outro link.`
+          ? `${err.message} Mande uma nova mensagem no chat para receber outro link.`
           : 'Erro ao concluir o login. Veja os logs do backend.',
       );
     }

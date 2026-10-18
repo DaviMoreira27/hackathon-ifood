@@ -9,12 +9,18 @@ async function bootstrap() {
   // Valida o .env antes de subir qualquer módulo: erro de configuração aparece inteiro, de uma vez.
   const config = appConfig();
   const agent = loadAgentConfig();
-  const app = await NestFactory.create(AppModule);
+  // rawBody: o webhook do WhatsApp confere a assinatura HMAC sobre o corpo cru.
+  const app = await NestFactory.create(AppModule.forRoot(config), {
+    rawBody: true,
+  });
   await app.listen(config.port);
   const logger = new Logger('Bootstrap');
   logger.log(`HTTP ouvindo na porta ${config.port}`);
   logger.log(`IFOOD_REDIRECT_URI=${config.ifood.redirectUri}`);
   logger.log(`MCP_SERVER_URL=${config.mcp.serverUrl ?? '(não definida)'}`);
+  logger.log(
+    `Canais: ${[config.telegramBotToken && 'Telegram', config.whatsapp && 'WhatsApp'].filter(Boolean).join(', ')}`,
+  );
   if (!agent.apiKey) logger.warn('ANTHROPIC_API_KEY não definida');
 }
 await bootstrap();
