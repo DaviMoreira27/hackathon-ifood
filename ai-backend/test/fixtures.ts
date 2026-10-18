@@ -4,6 +4,7 @@ import {
   cartPayers,
   carts,
   chats,
+  messages,
   orders,
   participants,
   payments,
@@ -126,6 +127,8 @@ export async function deleteTestUsers(
     .from(users)
     .where(inArray(users.chatId, chatIds));
   const ids = found.map((u) => u.id);
+  // Mensagens apontam para o usuário sem cascata: saem antes dele.
+  await db.delete(messages).where(inArray(messages.chatId, chatIds));
   if (ids.length) {
     await db.delete(orders).where(inArray(orders.ownerUserId, ids));
     await db.delete(users).where(inArray(users.id, ids));
