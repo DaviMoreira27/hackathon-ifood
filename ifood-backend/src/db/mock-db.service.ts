@@ -35,6 +35,20 @@ CREATE TABLE IF NOT EXISTS mock_ifood.outbox (
   published_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_unpublished ON mock_ifood.outbox (id) WHERE published_at IS NULL;
+
+-- Pedido em grupo como o app mostra ao pagador (itens, fotos, loja), enviado pelo ai-backend com
+-- os dados do MCP. O status de cada subpedido não fica aqui: vem da cobrança (charges).
+CREATE TABLE IF NOT EXISTS mock_ifood.orders (
+  reference  TEXT PRIMARY KEY,
+  snapshot   JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Cobrança → pedido (cada subpedido é uma cobrança).
+CREATE TABLE IF NOT EXISTS mock_ifood.order_charges (
+  charge_reference TEXT PRIMARY KEY,
+  order_reference  TEXT NOT NULL REFERENCES mock_ifood.orders(reference) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_order_charges_order ON mock_ifood.order_charges (order_reference);
 `;
 
 @Injectable()

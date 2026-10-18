@@ -33,11 +33,13 @@ export interface PaymentApplied {
 }
 
 type Listener = (applied: PaymentApplied) => void | Promise<void>;
+type IssuedListener = (orderId: number) => Promise<void>;
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
   private readonly listeners: Listener[] = [];
+  private readonly issuedListeners: IssuedListener[] = [];
 
   constructor(
     private readonly database: DbService,
@@ -50,6 +52,24 @@ export class PaymentsService {
 
   onPaymentApplied(listener: Listener): void {
     this.listeners.push(listener);
+  }
+
+  onChargesIssued(listener: IssuedListener): void {
+    this.issuedListeners.push(listener);
+  }
+
+  // Chamado depois de emitir/reemitir as cobranças de um pedido (ex.: publicar o pedido no
+  // provedor). Falha aqui não invalida as cobranças: só é registrada.
+  async chargesIssued(orderId: number): Promise<void> {
+    for (const listener of this.issuedListeners) {
+      try {
+        await listener(orderId);
+      } catch (err) {
+        this.logger.error(
+          `Falha pós-emissão das cobranças do pedido ${orderId}: ${String(err)}`,
+        );
+      }
+    }
   }
 
   // Pede a cobrança ao provedor e guarda o link. Idempotente (a referência é o id do pagamento).

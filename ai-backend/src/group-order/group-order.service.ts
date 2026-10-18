@@ -867,6 +867,7 @@ export class GroupOrderService {
         failed.push(p.participantName);
       }
     }
+    await this.paymentsService.chargesIssued(orderId);
     return failed;
   }
 

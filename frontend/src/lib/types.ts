@@ -52,6 +52,31 @@ export interface CreatePaymentPayload {
   cpf?: string;
 }
 
+// Resposta do ifood-backend: GET /orders/by-token/:token (um subpedido por cobrança).
+export interface PayerOrderView {
+  reference: string;
+  label: string; // "#123"
+  address: { street: string; district: string; complement: string } | null;
+  ownChargeReference: string; // subpedido do dono do link
+  subOrders: {
+    chargeReference: string;
+    participant: string;
+    restaurant: { name: string };
+    eta: string | null;
+    amountCents: number;
+    status: "pending" | "paid" | "cancelled" | "expired" | "missing";
+    paidAt: string | null;
+    items: {
+      id: string;
+      name: string;
+      description: string | null;
+      quantity: number;
+      unitPriceCents: number;
+      options: { name: string; quantity: number }[];
+    }[];
+  }[];
+}
+
 // Cobrança gerada para UM subpedido.
 export interface Charge {
   id: string;

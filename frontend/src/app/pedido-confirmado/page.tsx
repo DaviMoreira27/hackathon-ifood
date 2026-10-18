@@ -46,7 +46,7 @@ export default function PedidoConfirmadoPage() {
         </span>
         <h1 className="mt-8 text-[26px] font-medium text-ink">Pagamento confirmado!</h1>
         <p className="mt-3 max-w-[320px] text-[18px] text-muted">
-          {sub.restaurant.name} recebeu o {sub.label.toLowerCase()} do pedido {orderId}. Previsão de chegada: {sub.eta.replace("Hoje, ", "")}.
+          {sub.restaurant.name} recebeu o {sub.label.charAt(0).toLowerCase() + sub.label.slice(1)} do pedido {orderId}. Previsão de chegada: {sub.eta.replace("Hoje, ", "")}.
         </p>
         <p className="mt-6 text-[18px] text-ink">{PAYMENT_META[payment].label} • {brl(charge.total)}</p>
         <p className="mt-3 text-[15px] text-muted">

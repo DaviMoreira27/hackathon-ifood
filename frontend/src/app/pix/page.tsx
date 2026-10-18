@@ -5,6 +5,7 @@ import { Check, Copy } from "@/components/icons";
 import { PlainHeader, PrimaryButton, Screen } from "@/components/ui";
 import { brl, formatTimer } from "@/lib/format";
 import { PIX_TTL_SECONDS } from "@/lib/mock";
+import { getChargeStatus, hasBackend, payCharge } from "@/services/api";
 import { useOrder } from "@/store/order";
 
 function PixIllustration() {
@@ -35,10 +36,18 @@ export default function PixPage() {
   const orderId = useOrder((s) => s.orderId);
   const sub = useOrder((s) => s.subOrders.find((x) => x.id === s.charge?.subOrderId) ?? null);
   const setSubOrderStatus = useOrder((s) => s.setSubOrderStatus);
+  const token = useOrder((s) => s.token);
 
   const [remaining, setRemaining] = useState(PIX_TTL_SECONDS);
   const [copied, setCopied] = useState(false);
   const [help, setHelp] = useState(false);
+  const [simulating, setSimulating] = useState(false);
+
+  const confirmPaid = useCallback(() => {
+    if (!charge) return;
+    setSubOrderStatus(charge.subOrderId, "paid", "Você");
+    router.push("/pedido-confirmado");
+  }, [charge, setSubOrderStatus, router]);
 
   // sem cobrança (acesso direto à URL) volta para o início do fluxo
   useEffect(() => {
@@ -54,6 +63,15 @@ export default function PixPage() {
   }, [charge]);
 
   const expired = remaining === 0;
+
+  // Pix pago no app do banco: o mock do iFood marca a cobrança como paga (e publica o evento)
+  useEffect(() => {
+    if (!hasBackend || !token || !charge?.pixCode || expired) return;
+    const id = setInterval(() => {
+      getChargeStatus(token).then((status) => status === "paid" && confirmPaid()).catch(() => undefined);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [token, charge, expired, confirmPaid]);
   const progress = Math.max(0, Math.min(1, remaining / PIX_TTL_SECONDS));
 
   // código vencido: o subpedido volta a ficar disponível para ser pago
@@ -150,9 +168,18 @@ export default function PixPage() {
 
       {process.env.NODE_ENV !== "production" && (
         <button
-          onClick={() => {
-            setSubOrderStatus(charge.subOrderId, "paid", "Você");
-            router.push("/pedido-confirmado");
+          disabled={simulating || expired}
+          onClick={async () => {
+            if (hasBackend && token) {
+              setSimulating(true);
+              try {
+                await payCharge(token);
+              } catch {
+                // já paga (ex.: corrida com o polling) ou recusada: o status real decide
+                if ((await getChargeStatus(token).catch(() => null)) !== "paid") return setSimulating(false);
+              }
+            }
+            confirmPaid();
           }}
           className="mt-8 w-full rounded-xl border border-dashed border-muted py-3 text-[15px] text-muted"
         >

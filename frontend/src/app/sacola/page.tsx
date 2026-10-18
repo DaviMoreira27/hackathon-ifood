@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Check } from "@/components/icons";
 import { BottomTotal, Radio, SacolaHeader, Screen } from "@/components/ui";
 import { brl } from "@/lib/format";
+import { useLinkedOrder } from "@/lib/linked-order";
 import { getTotals, selectCurrent, useOrder } from "@/store/order";
 import type { SubOrder } from "@/lib/types";
 
@@ -25,6 +26,7 @@ function StatusBadge({ sub }: { sub: SubOrder }) {
 
 export default function SacolaPage() {
   const router = useRouter();
+  useLinkedOrder();
   const subOrders = useOrder((s) => s.subOrders);
   const orderId = useOrder((s) => s.orderId);
   const select = useOrder((s) => s.select);

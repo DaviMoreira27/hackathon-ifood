@@ -61,12 +61,30 @@ export class PaymentProviderClient {
     return 'cancelled';
   }
 
-  private async post(path: string, body: unknown): Promise<Response> {
+  // Pedido como o app do iFood mostra ao pagador (idempotente: reenviar substitui).
+  async publishOrder(reference: string, snapshot: unknown): Promise<void> {
+    const response = await this.post(
+      `/orders/${encodeURIComponent(reference)}`,
+      snapshot,
+      'PUT',
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Provedor recusou o pedido (HTTP ${response.status}): ${await response.text()}`,
+      );
+    }
+  }
+
+  private async post(
+    path: string,
+    body: unknown,
+    method: 'POST' | 'PUT' = 'POST',
+  ): Promise<Response> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
         const response = await fetch(`${this.baseUrl}${path}`, {
-          method: 'POST',
+          method,
           headers: {
             'Content-Type': 'application/json',
             'x-api-key': this.apiKey,
@@ -80,7 +98,7 @@ export class PaymentProviderClient {
         lastError = err;
       }
       this.logger.warn(
-        `POST ${path} falhou (tentativa ${attempt}/${ATTEMPTS}): ${String(lastError)}`,
+        `${method} ${path} falhou (tentativa ${attempt}/${ATTEMPTS}): ${String(lastError)}`,
       );
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));

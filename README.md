@@ -17,6 +17,7 @@
 O `up` faz, nesta ordem: Postgres e RabbitMQ em containers (docker ou podman, o que existir) → cria o banco se não existir e roda as migrações que faltam (`ai-backend/db/migrate.sh`) → mock do iFood (porta 3001) → `ai-backend` (porta 3000).
 
 - Antes do primeiro `up`, preencha `ai-backend/.env` (se não existir, o script cria a partir do exemplo e avisa o que falta). O `.env` do mock é criado sozinho.
-- O front do pagador não é iniciado pelo script: o link enviado no Telegram vem de `PAYMENT_LINK_TEMPLATE` (padrão `http://localhost:5173/pay/{token}`). Ele consome `GET /payments/by-token/:token` e `POST /payments/by-token/:token/pay` no mock.
+- O front do pagador não é iniciado pelo script: `cd frontend && npm run dev` (porta 5173, `NEXT_PUBLIC_API_URL=http://localhost:3001`). O link enviado no Telegram vem de `PAYMENT_LINK_TEMPLATE` (padrão `http://localhost:5173/pay/{token}`). Ele consome `GET /orders/by-token/:token`, `GET /payments/by-token/:token` e `POST /payments/by-token/:token/pay` no mock.
+- Ao emitir as cobranças, o ai-backend envia o pedido ao mock (`PUT /orders/:id`, com `x-api-key`), juntando o banco com o `getCart` do MCP.
 - Outros comandos: `./dev.sh migrate` (só migrações), `./dev.sh restart` (reinicia os backends) e `./dev.sh reset --yes` (**apaga** banco e filas e recomeça do zero).
 - Testes de integração (Postgres/RabbitMQ reais) ficam pulados sem `TEST_DATABASE_URL`, `TEST_RABBITMQ_URL` e `TEST_MOCK_URL` (ver os cabeçalhos dos `*.spec.ts`).

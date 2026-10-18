@@ -39,6 +39,10 @@ die()  { printf '%serro:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "'$1' não encontrado no PATH"; }
 
+# Git Bash / MSYS no Windows: não há setsid nem grupos de processos; o down usa taskkill na árvore.
+is_windows() { case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac; }
+need_service_cmds() { need_cmd node; need_cmd npm; need_cmd curl; is_windows || need_cmd setsid; }
+
 # Algo aceita conexões nessa porta? (bash puro, sem ss/lsof)
 port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1; }
 
@@ -271,7 +275,11 @@ start_service() { # serviço
   # (npm → nest → node). PORT no ambiente vence o do .env (o dotenv não sobrescreve).
   (
     cd "$dir"
-    PORT="$port" setsid npm run start:dev >>"$log" 2>&1 </dev/null &
+    if is_windows; then
+      PORT="$port" npm run start:dev >>"$log" 2>&1 </dev/null &
+    else
+      PORT="$port" setsid npm run start:dev >>"$log" 2>&1 </dev/null &
+    fi
     echo $! >"$(pid_file "$name")"
   )
   pid="$(cat "$(pid_file "$name")")"
@@ -301,8 +309,17 @@ stop_service() { # serviço
     say "  $name não está rodando"
     return 0
   fi
-  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
   say "  parando $name (pid $pid)"
+  if is_windows; then
+    local winpid
+    winpid="$(cat "/proc/$pid/winpid" 2>/dev/null || true)"
+    # /T: npm → nest → node; sem isso o node continuaria segurando a porta
+    if [ -n "$winpid" ]; then taskkill //T //F //PID "$winpid" >/dev/null 2>&1 || true; fi
+    kill "$pid" 2>/dev/null || true
+    rm -f "$(pid_file "$name")"
+    return 0
+  fi
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
   # Só mata o grupo inteiro se o serviço realmente é o líder dele (foi iniciado por este script).
   if [ "$pgid" = "$pid" ]; then kill -TERM -- "-$pid" 2>/dev/null || true; else kill -TERM "$pid" 2>/dev/null || true; fi
   for ((i = 0; i < 30; i++)); do
@@ -318,7 +335,7 @@ stop_service() { # serviço
 # ───────────────────────── comandos ─────────────────────────
 
 cmd_up() {
-  need_cmd node; need_cmd npm; need_cmd curl; need_cmd setsid
+  need_service_cmds
   detect_engine
   validate_env
   # Não mexe em node_modules de um serviço que já está rodando.
@@ -412,7 +429,7 @@ cmd_migrate() {
 }
 
 cmd_restart() {
-  need_cmd node; need_cmd npm; need_cmd curl; need_cmd setsid
+  need_service_cmds
   step "Reiniciando backends"
   stop_service ai-backend
   stop_service ifood-backend

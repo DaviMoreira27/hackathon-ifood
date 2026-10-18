@@ -15,7 +15,7 @@ function MethodIcon({ method }: { method: PaymentMethod }) {
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { orderId, address, payment, cpf, setCpf, setCharge, setSubOrderStatus } = useOrder();
+  const { orderId, token, address, payment, cpf, setCpf, setCharge, setSubOrderStatus } = useOrder();
   const current = useOrder(selectCurrent);
   const meta = PAYMENT_META[payment];
 
@@ -49,7 +49,8 @@ export default function CheckoutPage() {
           payment,
           cpf: cpfValid ? cpf.replace(/\D/g, "") : undefined,
         },
-        t.total
+        t.total,
+        token
       );
       setCharge(charge);
       // Pix fica aguardando; Google Pay é aprovado na hora (simulação)
