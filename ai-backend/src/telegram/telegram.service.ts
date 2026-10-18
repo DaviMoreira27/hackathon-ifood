@@ -4,13 +4,19 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import TelegramBot from 'node-telegram-bot-api';
 import { AgentService } from '../agent/agent.service.js';
 import type { ReplyImage } from '../agent/images.js';
-import { AuthService } from '../auth/auth.service.js';
-import { PaymentsService } from '../payments/payments.service.js';
+import {
+  PAYMENT_APPLIED,
+  USER_LOGGED_IN,
+  type UserLoggedIn,
+} from '../common/events.js';
+import type { PaymentApplied } from '../payments/payments.service.js';
 import { markdownToTelegramHtml } from './markdown.js';
 import { formatPaymentNotice } from './payment-notice.js';
+import { appConfig } from '../config/app-config.js';
 
 // Botões do pedido de confirmação. O toque vira a mesma mensagem que a pessoa digitaria, então
 // passa pelas mesmas regras do agente (ação pendente, prazo, uso único).
@@ -34,14 +40,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: TelegramBot;
 
-  constructor(
-    private readonly agent: AgentService,
-    private readonly auth: AuthService,
-    private readonly payments: PaymentsService,
-  ) {}
+  constructor(private readonly agent: AgentService) {}
 
   onModuleInit(): void {
-    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const token = appConfig().telegramBotToken;
     if (!token) throw new Error('TELEGRAM_BOT_TOKEN não definido no .env');
 
     this.bot = new TelegramBot(token, { polling: true });
@@ -53,21 +55,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       ),
     );
 
-    // userId do agent = chat.id do Telegram, então dá para avisar o chat quando o login termina.
-    this.auth.onLogin((chatId) =>
-      this.sendMessage(
-        chatId,
-        'Login no iFood feito ✅ Pode mandar seu pedido.',
-      ),
-    );
-
-    // Pagamento confirmado (vindo do RabbitMQ): avisa o dono do pedido no chat dele.
-    this.payments.onPaymentApplied(async (applied) => {
-      if (applied.ownerChatId === null) return;
-      await this.sendMessage(applied.ownerChatId, formatPaymentNotice(applied));
-    });
-
     this.logger.log('Telegram bot iniciado com long polling');
+  }
+
+  // userId do agent = chat.id do Telegram, então dá para avisar o chat quando o login termina.
+  @OnEvent(USER_LOGGED_IN)
+  async onUserLoggedIn({ chatId }: UserLoggedIn): Promise<void> {
+    await this.sendMessage(
+      chatId,
+      'Login no iFood feito ✅ Pode mandar seu pedido.',
+    );
+  }
+
+  // Pagamento confirmado (vindo do RabbitMQ): avisa o dono do pedido no chat dele.
+  @OnEvent(PAYMENT_APPLIED)
+  async onPaymentApplied(applied: PaymentApplied): Promise<void> {
+    if (applied.ownerChatId === null) return;
+    await this.sendMessage(applied.ownerChatId, formatPaymentNotice(applied));
   }
 
   onModuleDestroy(): void {
@@ -113,6 +117,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     text: string,
     from?: TelegramBot.User,
   ): Promise<void> {
+    // "digitando..." é só cosmético: se falhar, segue o fluxo. O Telegram apaga o status depois de
+    // ~5s, então ele é reenviado enquanto o agente trabalha.
+    const typing = () =>
+      void this.bot.sendChatAction(chatId, 'typing').catch(() => undefined);
+    const typingTimer = setInterval(typing, TYPING_INTERVAL_MS);
     try {
       await this.withRetry('sendChatAction', () =>
         this.bot.sendChatAction(chatId, 'typing'),

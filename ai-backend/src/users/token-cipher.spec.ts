@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { TokenCipher, TokenCipherError, parseKey } from './token-cipher.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 const KEY = randomBytes(32).toString('base64');
 
@@ -26,14 +27,17 @@ describe('TokenCipher', () => {
 
   beforeEach(() => {
     process.env.TOKEN_ENCRYPTION_KEY = KEY;
+    resetAppConfig();
     cipher = new TokenCipher();
   });
   afterAll(() => {
     delete process.env.TOKEN_ENCRYPTION_KEY;
+    resetAppConfig();
   });
 
   it('não sobe sem chave válida (nunca grava em texto puro por falta de chave)', () => {
     delete process.env.TOKEN_ENCRYPTION_KEY;
+    resetAppConfig();
     expect(() => new TokenCipher()).toThrow(/TOKEN_ENCRYPTION_KEY/);
   });
 
@@ -85,6 +89,7 @@ describe('TokenCipher', () => {
   it('não decifra com outra chave', () => {
     const encrypted = cipher.encrypt('segredo', 'ctx');
     process.env.TOKEN_ENCRYPTION_KEY = randomBytes(32).toString('base64');
+    resetAppConfig();
     expect(() => new TokenCipher().decrypt(encrypted, 'ctx')).toThrow(
       TokenCipherError,
     );

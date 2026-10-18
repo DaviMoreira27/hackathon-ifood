@@ -1,5 +1,5 @@
 import type { OrderView } from '../group-order/group-order.service.js';
-import { UNTRUSTED_TAG } from './tool-policy.js';
+import { UNTRUSTED_TAG } from './tool-envelope.js';
 
 // Estado do pedido em grupo montado pelo código. Vai em dois lugares:
 //  - anexado à mensagem do usuário a cada turno (o LLM não precisa adivinhar nem lembrar o cartId

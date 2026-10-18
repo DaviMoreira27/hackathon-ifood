@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { eq } from 'drizzle-orm';
 import { createUser, deleteTestUsers } from '../../test/fixtures.js';
 import { DbService } from '../db/db.service.js';
@@ -9,6 +10,8 @@ import {
 } from './payment-events.consumer.js';
 import { PaymentProviderClient } from './payment-provider.client.js';
 import { PaymentsService, type PaymentApplied } from './payments.service.js';
+import { PAYMENT_APPLIED } from '../common/events.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 // Ponta a ponta com tudo de verdade: mock do iFood rodando (HTTP), Postgres e RabbitMQ.
 //   (no ifood-backend)  npm run build && PORT=3001 DATABASE_URL=... RABBITMQ_URL=... node dist/main
@@ -55,11 +58,17 @@ describe.skipIf(!enabled)(
     beforeAll(async () => {
       process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
       process.env.PAYMENTS_API_URL = MOCK;
+      resetAppConfig();
       database = new DbService();
-      service = new PaymentsService(database, new PaymentProviderClient());
+      const events = new EventEmitter2();
+      service = new PaymentsService(
+        database,
+        new PaymentProviderClient(),
+        events,
+      );
       groupOrder = new GroupOrderService(database, service);
       applied = [];
-      service.onPaymentApplied((a) => void applied.push(a));
+      events.on(PAYMENT_APPLIED, (a: PaymentApplied) => void applied.push(a));
       consumer = new PaymentEventsConsumer(service, {
         ...defaultConsumerOptions(),
         url: process.env.TEST_RABBITMQ_URL as string,

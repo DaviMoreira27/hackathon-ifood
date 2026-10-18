@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { appConfig } from '../config/app-config.js';
 
 export interface CreateChargeRequest {
   reference: string;
@@ -25,14 +26,11 @@ export class PaymentProviderClient {
   private readonly logger = new Logger(PaymentProviderClient.name);
 
   private get baseUrl(): string {
-    return (process.env.PAYMENTS_API_URL ?? 'http://localhost:3001').replace(
-      /\/+$/,
-      '',
-    );
+    return appConfig().payments.apiUrl.replace(/\/+$/, '');
   }
 
   private get apiKey(): string {
-    return process.env.PAYMENTS_API_KEY ?? 'dev-mock-key';
+    return appConfig().payments.apiKey;
   }
 
   async createCharge(request: CreateChargeRequest): Promise<Charge> {

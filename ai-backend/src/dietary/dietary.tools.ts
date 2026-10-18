@@ -26,6 +26,7 @@ import {
   type SavedRestriction,
 } from './dietary.check.js';
 import { DietaryService, type NewRestriction } from './dietary.service.js';
+import { appConfig } from '../config/app-config.js';
 
 // Filtro de restrição alimentar, ligado só para quem declarou uma restrição. As ferramentas ficam
 // sempre na lista (assim o modelo consegue salvar quando o usuário falar), mas a política de uso
@@ -393,16 +394,7 @@ export class DietaryTools {
   }
 
   isGuardedTool(name: string): boolean {
-    let pattern: RegExp;
-    try {
-      pattern = new RegExp(
-        process.env.DIET_GUARDED_TOOL_PATTERN || 'add_?(item_?)?to_?cart',
-        'i',
-      );
-    } catch {
-      pattern = /add_?(item_?)?to_?cart/i;
-    }
-    return pattern.test(name);
+    return appConfig().mcp.dietGuardedToolPattern.test(name);
   }
 
   // Trava do carrinho para quem tem restrição: item nunca verificado é recusado; item cortado só

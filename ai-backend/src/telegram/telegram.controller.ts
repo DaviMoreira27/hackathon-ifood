@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
 import { TelegramService } from './telegram.service.js';
+import { appConfig } from '../config/app-config.js';
 
 interface SendMessageDto {
   chatId: number;
@@ -16,7 +17,7 @@ interface SendMessageDto {
 // Sem chave, qualquer um que alcance a porta mandaria mensagens em nome do bot para qualquer chat
 // (ex.: um "link de login" falso). Sem INTERNAL_API_KEY definida, a rota fica desligada.
 function isAuthorized(provided: string | undefined): boolean {
-  const expected = process.env.INTERNAL_API_KEY;
+  const expected = appConfig().internalApiKey;
   if (!expected || !provided) return false;
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);

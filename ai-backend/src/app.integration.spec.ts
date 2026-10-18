@@ -9,6 +9,7 @@ import { GroupOrderTools } from './group-order/group-order.tools.js';
 import { PaymentEventsConsumer } from './payments/payment-events.consumer.js';
 import { PaymentsService } from './payments/payments.service.js';
 import { PAYMENT_CONFIRMED } from './payments/topology.js';
+import { resetAppConfig } from './config/app-config.js';
 
 // Bot do Telegram simulado: o resto do app (módulos, DI, consumidor, listeners) é o de verdade.
 const bot = vi.hoisted(() => ({
@@ -51,6 +52,7 @@ describe.skipIf(
     process.env.RABBITMQ_URL = process.env.TEST_RABBITMQ_URL;
     process.env.TELEGRAM_BOT_TOKEN = 'token-falso';
     process.env.TOKEN_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString('base64');
+    resetAppConfig();
     const module = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();

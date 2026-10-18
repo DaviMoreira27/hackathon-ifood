@@ -2,6 +2,8 @@
 // vê: nome da loja, observação e complementos de cada item, prazo e endereço de entrega.
 // Valores (preço, total) NUNCA saem daqui: vêm do banco (o que o sistema cobrou).
 
+import { isObj, type Obj } from '../common/json.js';
+
 export interface McpCartItem {
   cartItemId: string;
   itemId: string;
@@ -17,10 +19,6 @@ export interface McpCartInfo {
   items: McpCartItem[];
 }
 
-type Obj = Record<string, unknown>;
-
-const isObj = (v: unknown): v is Obj =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown, max = 200): string =>
   typeof v === 'string' || typeof v === 'number'
     ? String(v).replace(/\s+/g, ' ').trim().slice(0, max)

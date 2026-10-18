@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { eq } from 'drizzle-orm';
 import { createUser, deleteTestUsers } from '../../test/fixtures.js';
 import { DbService } from '../db/db.service.js';
@@ -23,6 +24,7 @@ import {
   type CartSummary,
   type SyncCartInput,
 } from './group-order.service.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 class FakeProvider {
   created: CreateChargeRequest[] = [];
@@ -125,6 +127,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('GroupOrderService', () => {
 
   beforeAll(() => {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+    resetAppConfig();
     database = new DbService();
   });
 
@@ -133,6 +136,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('GroupOrderService', () => {
     payments_ = new PaymentsService(
       database,
       provider as unknown as PaymentProviderClient,
+      new EventEmitter2(),
     );
     service = new GroupOrderService(database, payments_);
     const chat = BASE + chatIds.length + 1;

@@ -14,7 +14,7 @@ import { DEFAULT_AGENT_CONFIG } from './agent.config.js';
 import { AgentService } from './agent.service.js';
 import type { TurnTracesService } from './turn-traces.service.js';
 import { messagesToRows } from './history.js';
-import { wrapToolResult } from './tool-policy.js';
+import { wrapToolResult } from './tool-envelope.js';
 
 // MessagesService em memória, com a mesma semântica de ordem/janela do real.
 class FakeMessages {

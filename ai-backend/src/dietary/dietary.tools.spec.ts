@@ -9,6 +9,7 @@ import {
   DietaryTools,
   policyFor,
 } from './dietary.tools.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 const CTX = { chatId: 10, userId: 7 };
 
@@ -68,6 +69,7 @@ describe('DietaryTools', () => {
 
   beforeEach(() => {
     delete process.env.DIET_GUARDED_TOOL_PATTERN;
+    resetAppConfig();
     diet = new FakeDiet();
     tools = new DietaryTools(diet as unknown as DietaryService);
   });

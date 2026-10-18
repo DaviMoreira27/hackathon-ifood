@@ -1,6 +1,8 @@
 import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
 import type { SyncCartInput } from '../group-order/group-order.service.js';
-import { UNTRUSTED_TAG } from './tool-policy.js';
+import { isObj, parseJsonSafe, pick, text, type Obj } from '../common/json.js';
+import { unwrapToolText } from './tool-envelope.js';
+import { appConfig } from '../config/app-config.js';
 
 // Sync automático do carrinho: depois de cada alteração bem-sucedida num carrinho do iFood, o
 // código lê o carrinho (getCart) e registra no pedido em grupo os itens, preços, subtotal e total
@@ -10,27 +12,14 @@ import { UNTRUSTED_TAG } from './tool-policy.js';
 // motivo e o agent avisa o LLM para usar group_sync_cart (caminho manual, de reserva).
 
 export const GET_CART = 'getCart';
-const DEFAULT_SYNC_TOOLS = [
-  'addItemToCart',
-  'updateCartItem',
-  'removeItemFromCart',
-  'setCartDelivery',
-  'setVoucher',
-  'removeVoucher',
-];
 
 // MCP_CART_SYNC_TOOLS (nomes separados por vírgula) substitui a lista padrão.
-export function triggersCartSync(name: string): boolean {
-  const configured = process.env.MCP_CART_SYNC_TOOLS;
-  const list = configured
-    ? configured.split(',').map((s) => s.trim())
-    : DEFAULT_SYNC_TOOLS;
-  return list.includes(name);
+export function triggersCartSync(
+  name: string,
+  tools: string[] = appConfig().mcp.cartSyncTools,
+): boolean {
+  return tools.includes(name);
 }
-
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const CART_ID_KEYS = ['cartId', 'cart_id', 'ifoodCartId'];
 
@@ -59,18 +48,8 @@ function findCartId(value: unknown, depth = 0): string | null {
   return null;
 }
 
-export const unwrapToolText = (content: string) =>
-  content
-    .replace(new RegExp(`^<${UNTRUSTED_TAG}[^>]*>\\n`), '')
-    .replace(new RegExp(`\\n</${UNTRUSTED_TAG}>$`), '');
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(unwrapToolText(text));
-  } catch {
-    return undefined;
-  }
-}
+const parseJson = (output: string): unknown =>
+  parseJsonSafe(unwrapToolText(output));
 
 // O carrinho alterado: primeiro o argumento da chamada, depois o resultado da ferramenta.
 export function cartIdOf(input: unknown, output: string): string | null {
@@ -106,17 +85,6 @@ function money(v: unknown): number | null {
   }
   if (isObj(v)) return money(v.value ?? v.amount);
   return null;
-}
-
-function pick(o: Obj, keys: string[]): unknown {
-  for (const k of keys) if (o[k] !== undefined && o[k] !== null) return o[k];
-  return undefined;
-}
-
-function text(v: unknown, max = 200): string {
-  return typeof v === 'string'
-    ? v.replace(/\s+/g, ' ').trim().slice(0, max)
-    : '';
 }
 
 const ITEM_LIST_KEYS = ['items', 'cartItems', 'lines', 'products'];

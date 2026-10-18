@@ -1,9 +1,10 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { eq, inArray } from 'drizzle-orm';
 import type Anthropic from '@anthropic-ai/sdk';
 import { TurnTracesService } from '../agent/turn-traces.service.js';
 import { DEFAULT_AGENT_CONFIG } from '../agent/agent.config.js';
 import { AgentService } from '../agent/agent.service.js';
-import { wrapToolResult } from '../agent/tool-policy.js';
+import { wrapToolResult } from '../agent/tool-envelope.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { McpService } from '../mcp/mcp.service.js';
 import { GroupOrderService } from '../group-order/group-order.service.js';
@@ -17,6 +18,7 @@ import { TokenCipher } from '../users/token-cipher.js';
 import { UsersService } from '../users/users.service.js';
 import { DbService } from './db.service.js';
 import { carts, messages, orders, users } from './schema.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 // Roda contra um Postgres real (schema de db/init.sql). Exemplo:
 //   TEST_DATABASE_URL=postgresql://ifood:ifood@localhost:5433/ifood npm test
@@ -29,8 +31,10 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
 
   beforeAll(() => {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+    resetAppConfig();
     database = new DbService();
     process.env.TOKEN_ENCRYPTION_KEY ??= 'a'.repeat(43) + '=';
+    resetAppConfig();
     usersService = new UsersService(database, new TokenCipher());
     messagesService = new MessagesService(database);
   });
@@ -205,7 +209,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
       new GroupOrderTools(
         new GroupOrderService(
           database,
-          new PaymentsService(database, new PaymentProviderClient()),
+          new PaymentsService(
+            database,
+            new PaymentProviderClient(),
+            new EventEmitter2(),
+          ),
         ),
       ),
       new DietaryTools(new DietaryService(database)),

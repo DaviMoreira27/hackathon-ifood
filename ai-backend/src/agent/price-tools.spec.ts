@@ -1,6 +1,6 @@
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages.js';
 import { comparePrices, priceFacts } from './price-tools.js';
-import { wrapToolResult } from './tool-policy.js';
+import { wrapToolResult } from './tool-envelope.js';
 
 // Conversa com resultados no formato do Offer Discovery MCP.
 function conversation(...results: Array<[string, unknown]>): MessageParam[] {

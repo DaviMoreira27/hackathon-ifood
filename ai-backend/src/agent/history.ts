@@ -4,7 +4,7 @@ import type {
   ToolResultBlockParam,
 } from '@anthropic-ai/sdk/resources/messages.js';
 import type { Message, NewMessage } from '../messages/messages.service.js';
-import { shrinkToolResult } from './tool-policy.js';
+import { shrinkToolResult } from './tool-envelope.js';
 
 // Reconstrói a conversa do LLM a partir das linhas da tabela messages:
 //   user      → texto do usuário

@@ -196,18 +196,18 @@ escuta. Mudança pequena e isolada.
 
 Cada passo é um PR/commit que mantém os specs verdes.
 
-- [ ] 1.1 `src/common/json.ts` e `tool-envelope.ts`; trocar as cópias locais.
-- [ ] 1.2 `AppConfig` tipado e validado no boot; trocar as leituras de `process.env`.
-- [ ] 1.3 Extrair `ChatQueue` de `AgentService` (com spec próprio: serialização, limite, limpeza).
-- [ ] 1.4 Introduzir `TurnContext` (sem memo ainda) no lugar de `TurnState`.
-- [ ] 1.5 `ToolHandler` + `ToolRegistry` + sources; `runTools` passa a despachar pelo registry.
-- [ ] 1.6 `ToolGate` + os quatro gates + gate do `group_confirm_order`; o bloco de pending fica só
+- [x] 1.1 `src/common/json.ts` e `tool-envelope.ts`; trocar as cópias locais.
+- [x] 1.2 `AppConfig` tipado e validado no boot; trocar as leituras de `process.env`.
+- [x] 1.3 Extrair `ChatQueue` de `AgentService` (com spec próprio: serialização, limite, limpeza).
+- [x] 1.4 Introduzir `TurnContext` (sem memo ainda) no lugar de `TurnState`.
+- [x] 1.5 `ToolHandler` + `ToolRegistry` + sources; `runTools` passa a despachar pelo registry.
+- [x] 1.6 `ToolGate` + os quatro gates + gate do `group_confirm_order`; o bloco de pending fica só
       no executor. `agent.security.spec.ts` é o que mais importa aqui.
-- [ ] 1.7 `ToolExecutor` (ainda com a regra atual de paralelismo) e hook de cart sync (ainda um por
+- [x] 1.7 `ToolExecutor` (ainda com a regra atual de paralelismo) e hook de cart sync (ainda um por
       chamada).
-- [ ] 1.8 `TurnRunner` e `ReplyFinalizer`; `AgentService` vira fachada.
-- [ ] 1.9 Dividir `group-order.service.ts` em query / command / charges.
-- [ ] 1.10 Eventos com `@nestjs/event-emitter`.
+- [x] 1.8 `TurnRunner` e `ReplyFinalizer`; `AgentService` vira fachada.
+- [x] 1.9 Dividir `group-order.service.ts` em query / command / charges.
+- [x] 1.10 Eventos com `@nestjs/event-emitter`.
 
 ### Fase 2 — performance em cima da estrutura nova
 

@@ -1,6 +1,8 @@
 // Converte o Markdown que o LLM escreve para o subconjunto de HTML aceito pelo Telegram
 // (b, i, s, code, pre, a, blockquote). Títulos viram negrito e listas viram "•".
 
+import { appConfig } from '../config/app-config.js';
+
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -13,13 +15,7 @@ function isTrustedHost(url: string): boolean {
   } catch {
     return false;
   }
-  const trusted = [
-    'ifood.com.br',
-    ...(process.env.TRUSTED_LINK_HOSTS ?? '')
-      .split(',')
-      .map((h) => h.trim().toLowerCase())
-      .filter(Boolean),
-  ];
+  const trusted = ['ifood.com.br', ...appConfig().trustedLinkHosts];
   return trusted.some((t) => host === t || host.endsWith(`.${t}`));
 }
 

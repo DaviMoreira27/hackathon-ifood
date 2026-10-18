@@ -1,5 +1,7 @@
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages.js';
-import { UNTRUSTED_TAG } from './tool-policy.js';
+import { isObj, text as clean, type Obj } from '../common/json.js';
+import { unwrapToolText } from './tool-envelope.js';
+import { appConfig } from '../config/app-config.js';
 
 // Fotos de pratos e logos de lojas. O LLM escolhe quais mostrar escrevendo, numa linha própria,
 // ![](item:<itemId>) ou ![](merchant:<merchantId>) — ou ![legenda](url) com a URL exata.
@@ -47,10 +49,7 @@ export function isTrustedImageUrl(url: string): boolean {
   const trusted = [
     'ifood-static.com.br',
     'ifood.com.br',
-    ...(process.env.TRUSTED_IMAGE_HOSTS ?? '')
-      .split(',')
-      .map((h) => h.trim().toLowerCase())
-      .filter(Boolean),
+    ...appConfig().trustedImageHosts,
   ];
   return trusted.some((t) => host === t || host.endsWith(`.${t}`));
 }
@@ -64,7 +63,7 @@ function resolve(value: unknown): string | null {
   if (/^https:\/\//i.test(v)) {
     url = v;
   } else {
-    const base = process.env.IFOOD_IMAGE_BASE_URL;
+    const base = appConfig().imageBaseUrl;
     if (!base || /^[a-z]+:/i.test(v) || !IMAGE_EXT.test(v)) return null;
     try {
       url = new URL(
@@ -80,13 +79,9 @@ function resolve(value: unknown): string | null {
 
 // ─── Legendas a partir dos campos do Offer Discovery MCP ─────────────────────
 
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
 const num = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
-const text = (v: unknown, max = 60): string =>
-  typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '';
+const text = (v: unknown, max = 60): string => clean(v, max);
 
 const brl = (value: number) =>
   `R$ ${value
@@ -208,13 +203,8 @@ function walk(
     walk(v, k, catalog, depth + 1, merchantName);
 }
 
-const unwrap = (content: string) =>
-  content
-    .replace(new RegExp(`^<${UNTRUSTED_TAG}[^>]*>\\n`), '')
-    .replace(new RegExp(`\\n</${UNTRUSTED_TAG}>$`), '');
-
 function collect(content: string, catalog: ImageCatalog): void {
-  const body = unwrap(content);
+  const body = unwrapToolText(content);
   try {
     walk(JSON.parse(body), '', catalog);
   } catch {

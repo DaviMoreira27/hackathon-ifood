@@ -7,6 +7,7 @@ import {
   PENDING_LOGIN_TTL_MS,
   PendingLoginsService,
 } from './pending-logins.service.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 // Roda contra um Postgres real:  TEST_DATABASE_URL=... npm test
 describe.skipIf(!process.env.TEST_DATABASE_URL)('PendingLoginsService', () => {
@@ -19,6 +20,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('PendingLoginsService', () => {
   beforeAll(() => {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
     process.env.TOKEN_ENCRYPTION_KEY = randomBytes(32).toString('base64');
+    resetAppConfig();
     database = new DbService();
     service = new PendingLoginsService(database, new TokenCipher());
   });

@@ -6,6 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
 import { isReadOnlyTool, requiresConfirmation } from '../agent/tool-policy.js';
+import { appConfig } from '../config/app-config.js';
 
 export class McpUnauthorizedError extends Error {}
 
@@ -53,7 +54,7 @@ export class McpService implements OnModuleDestroy {
       await cached.client.close().catch(() => undefined);
     }
 
-    const mcpUrl = process.env.MCP_SERVER_URL;
+    const mcpUrl = appConfig().mcp.serverUrl;
     if (!mcpUrl) throw new Error('MCP_SERVER_URL não definida');
 
     const client = new Client({ name: 'ai-backend', version: '1.0.0' });
@@ -121,7 +122,7 @@ export class McpService implements OnModuleDestroy {
       );
       // MCP_LOG_RAW=1 registra a saída inteira: serve para descobrir os campos reais (preço,
       // taxa, imagem) de cada ferramenta. Contém dados pessoais: não deixe ligado em produção.
-      if (process.env.MCP_LOG_RAW === '1') {
+      if (appConfig().mcp.logRaw) {
         this.logger.debug(
           `[mcp] saída crua de ${name}: ${JSON.stringify(result)}`,
         );

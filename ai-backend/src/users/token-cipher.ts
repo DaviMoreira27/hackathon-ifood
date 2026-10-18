@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { appConfig } from '../config/app-config.js';
 
 export class TokenCipherError extends Error {}
 
@@ -38,7 +39,7 @@ export class TokenCipher {
   // Falha já na criação (ou seja, no boot do app) se a chave estiver ausente ou inválida:
   // nunca grava segredo em texto puro "por falta de chave".
   constructor() {
-    this.key = parseKey(process.env.TOKEN_ENCRYPTION_KEY);
+    this.key = parseKey(appConfig().tokenEncryptionKey);
   }
 
   isEncrypted(value: string): boolean {

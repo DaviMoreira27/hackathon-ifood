@@ -3,7 +3,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
 import type { AgentConfig } from '../src/agent/agent.config.js';
 import { AgentService } from '../src/agent/agent.service.js';
 import { messagesToRows } from '../src/agent/history.js';
-import { wrapToolResult } from '../src/agent/tool-policy.js';
+import { wrapToolResult } from '../src/agent/tool-envelope.js';
 import type { AuthService } from '../src/auth/auth.service.js';
 import { DietaryTools } from '../src/dietary/dietary.tools.js';
 import type { DietaryService } from '../src/dietary/dietary.service.js';

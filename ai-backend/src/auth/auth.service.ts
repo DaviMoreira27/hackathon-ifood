@@ -1,39 +1,22 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes } from 'node:crypto';
+import { USER_LOGGED_IN, type UserLoggedIn } from '../common/events.js';
+import { appConfig } from '../config/app-config.js';
 import { UsersService } from '../users/users.service.js';
 import { PendingLoginsService } from './pending-logins.service.js';
 
 // Servidor de autenticação do iFood. A documentação cita id.ifood.com.br (página Implementation)
 // e auth.ifood.com.br / dev-auth.ifood.com.br (índice llms.txt): configurável por IFOOD_AUTH_BASE_URL.
 const authUrl = (path: string) =>
-  `${(process.env.IFOOD_AUTH_BASE_URL ?? 'https://id.ifood.com.br').replace(/\/+$/, '')}/${path}`;
+  `${appConfig().ifood.authBaseUrl.replace(/\/+$/, '')}/${path}`;
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
-// Sem mcp.cart.payment (consulta de meios de pagamento) por enquanto.
-const DEFAULT_SCOPES = [
-  'mcp.user.basic.read',
-  'mcp.user.advanced.read',
-  'mcp.user.addresses.read',
-  'mcp.user.behavior.read',
-  'mcp.user.addresses.write',
-  'mcp.discovery',
-  'mcp.discovery.search.read',
-  'mcp.discovery.browse.read',
-  'mcp.discovery.recommendation.read',
-  'mcp.discovery.details.read',
-  'mcp.cart',
-  'mcp.cart.read',
-  'mcp.cart.write',
-  'mcp.cart.checkout',
-  'mcp.orders.read',
-].join(' ');
 
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
 }
-
-type LoginListener = (chatId: number) => void | Promise<void>;
 
 export function createCodeChallenge(codeVerifier: string): string {
   return createHash('sha256').update(codeVerifier).digest('base64url');
@@ -42,27 +25,17 @@ export function createCodeChallenge(codeVerifier: string): string {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private readonly loginListeners: LoginListener[] = [];
 
   // Tokens (cifrados) e logins em andamento ficam no banco: reiniciar o back não desloga ninguém
   // nem invalida o link de login que acabou de ser enviado.
   constructor(
     private readonly users: UsersService,
     private readonly pending: PendingLoginsService,
+    private readonly events: EventEmitter2,
   ) {}
 
   private get config() {
-    return {
-      clientId: process.env.IFOOD_CLIENT_ID ?? '',
-      clientSecret: process.env.IFOOD_CLIENT_SECRET ?? '',
-      redirectUri:
-        process.env.IFOOD_REDIRECT_URI ?? 'http://localhost:3000/redirect',
-      scopes: process.env.IFOOD_SCOPES ?? DEFAULT_SCOPES,
-    };
-  }
-
-  onLogin(listener: LoginListener): void {
-    this.loginListeners.push(listener);
+    return appConfig().ifood;
   }
 
   async buildLoginUrl(chatId: number): Promise<string> {
@@ -112,12 +85,12 @@ export class AuthService {
       `[callback] tokens recebidos e salvos para o chat ${pending.chatId} (expira em ${tokens.expires_in}s)`,
     );
 
-    for (const listener of this.loginListeners) {
-      try {
-        await listener(pending.chatId);
-      } catch (err) {
-        this.logger.error(`Falha em listener de login: ${String(err)}`);
-      }
+    try {
+      await this.events.emitAsync(USER_LOGGED_IN, {
+        chatId: pending.chatId,
+      } satisfies UserLoggedIn);
+    } catch (err) {
+      this.logger.error(`Falha em listener de login: ${String(err)}`);
     }
     return pending.chatId;
   }

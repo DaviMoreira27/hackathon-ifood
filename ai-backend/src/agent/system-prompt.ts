@@ -1,4 +1,4 @@
-import { UNTRUSTED_TAG } from './tool-policy.js';
+import { UNTRUSTED_TAG } from './tool-envelope.js';
 
 export const SYSTEM_PROMPT = `Você é o assistente de pedidos do iFood, conversando pelo Telegram com quem está montando o pedido (o "dono").
 

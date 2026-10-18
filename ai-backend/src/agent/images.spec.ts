@@ -5,7 +5,8 @@ import {
   isTrustedImageUrl,
   takeImages,
 } from './images.js';
-import { wrapToolResult } from './tool-policy.js';
+import { resetAppConfig } from '../config/app-config.js';
+import { wrapToolResult } from './tool-envelope.js';
 
 // Formatos tirados da documentação do Offer Discovery MCP (Tools).
 const ITEM_IMG = 'https://cdn.ifood.com.br/items/4592.jpg';
@@ -62,7 +63,10 @@ const toolResult = (name: string, data: unknown): MessageParam => ({
 });
 
 describe('images', () => {
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetAppConfig();
+  });
 
   it('só confia em https de domínios do iFood (ou configurados)', () => {
     expect(isTrustedImageUrl(ITEM_IMG)).toBe(true);
@@ -71,6 +75,7 @@ describe('images', () => {
       false,
     );
     vi.stubEnv('TRUSTED_IMAGE_HOSTS', 'cdn.exemplo.com');
+    resetAppConfig();
     expect(isTrustedImageUrl('https://cdn.exemplo.com/a.jpg')).toBe(true);
   });
 
@@ -121,6 +126,7 @@ describe('images', () => {
       'IFOOD_IMAGE_BASE_URL',
       'https://static.ifood-static.com.br/image/upload/t_high',
     );
+    resetAppConfig();
     expect([...extractImages(json).byUrl.keys()]).toEqual([
       'https://static.ifood-static.com.br/image/upload/t_high/pratos/abc.jpg',
     ]);

@@ -7,6 +7,7 @@ import {
   type SyncCartInput,
   type SyncCartResult,
 } from './group-order.service.js';
+import { appConfig } from '../config/app-config.js';
 
 export interface ToolContext {
   chatId: number;
@@ -316,16 +317,7 @@ export class GroupOrderTools {
   }
 
   isCheckoutTool(name: string): boolean {
-    let pattern: RegExp;
-    try {
-      pattern = new RegExp(
-        process.env.MCP_CHECKOUT_TOOL_PATTERN || 'submit_?order|checkout',
-        'i',
-      );
-    } catch {
-      pattern = /submit_?order|checkout/i;
-    }
-    return pattern.test(name);
+    return appConfig().mcp.checkoutToolPattern.test(name);
   }
 
   // Barreira no momento da chamada (o modelo pode alucinar uma ferramenta escondida ou apontar

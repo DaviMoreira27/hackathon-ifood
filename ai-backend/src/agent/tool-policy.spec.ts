@@ -1,4 +1,5 @@
 import { requiresConfirmation } from './tool-policy.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 // Todas as ferramentas do MCP do iFood (documentação do portal).
 const READS = [
@@ -31,6 +32,7 @@ const CART_EDITS = [
 describe('requiresConfirmation (nomes reais do MCP do iFood)', () => {
   beforeEach(() => {
     delete process.env.MCP_CONFIRM_TOOLS;
+    resetAppConfig();
   });
 
   it('exige confirmação para o que cobra ou grava dados permanentes', () => {
@@ -72,6 +74,7 @@ describe('requiresConfirmation (nomes reais do MCP do iFood)', () => {
 
   it('MCP_CONFIRM_TOOLS substitui as regras', () => {
     process.env.MCP_CONFIRM_TOOLS = 'setCartPayment, removeItemFromCart';
+    resetAppConfig();
     expect(requiresConfirmation('setCartPayment')).toBe(true);
     expect(requiresConfirmation('removeItemFromCart')).toBe(true);
     expect(requiresConfirmation('submitOrder')).toBe(false);

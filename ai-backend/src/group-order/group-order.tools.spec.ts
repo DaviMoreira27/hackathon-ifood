@@ -1,6 +1,7 @@
 import { GroupOrderError } from './group-order.errors.js';
 import type { GroupOrderService } from './group-order.service.js';
 import { GROUP_TOOLS, GroupOrderTools } from './group-order.tools.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 const CTX = { chatId: 10, userId: 7 };
 
@@ -10,6 +11,7 @@ describe('GroupOrderTools', () => {
 
   beforeEach(() => {
     delete process.env.MCP_CHECKOUT_TOOL_PATTERN;
+    resetAppConfig();
     orders = {
       getOrderView: vi.fn(),
       addParticipant: vi.fn(),
@@ -97,6 +99,7 @@ describe('GroupOrderTools', () => {
 
     it('o padrão do checkout é configurável', () => {
       process.env.MCP_CHECKOUT_TOOL_PATTERN = '^finish_';
+      resetAppConfig();
       const merged = tools.mergeTools(
         [{ name: 'finish_order' }, { name: 'cart_checkout' }] as never[],
         false,
@@ -107,13 +110,9 @@ describe('GroupOrderTools', () => {
 
     it('valor vazio usa o padrão (e casa o submitOrder)', () => {
       process.env.MCP_CHECKOUT_TOOL_PATTERN = '';
+      resetAppConfig();
       expect(tools.isCheckoutTool('submitOrder')).toBe(true);
       expect(tools.isCheckoutTool('getCart')).toBe(false);
-    });
-
-    it('um padrão inválido cai no padrão seguro em vez de quebrar', () => {
-      process.env.MCP_CHECKOUT_TOOL_PATTERN = '(';
-      expect(tools.isCheckoutTool('cart_checkout')).toBe(true);
     });
 
     it('ferramenta do MCP com nome reservado é descartada', () => {

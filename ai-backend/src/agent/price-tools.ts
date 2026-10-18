@@ -4,7 +4,8 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages.js';
 import { GroupOrderError } from '../group-order/group-order.errors.js';
 import { formatBRL, toCents } from '../group-order/money.js';
-import { unwrapToolText } from './cart-sync.js';
+import { isObj, text as clean, type Obj } from '../common/json.js';
+import { unwrapToolText } from './tool-envelope.js';
 
 // Ferramenta local (não vai ao iFood) para comparar opções encontradas nas buscas. O LLM só
 // escolhe as opções (item_id); preço, taxa de entrega e pedido mínimo são lidos pelo código nos
@@ -84,14 +85,10 @@ export interface PriceFacts {
   merchants: Map<string, MerchantFact>;
 }
 
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
 const reais = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
 const cents = (v: number) => Math.round(v * 100);
-const text = (v: unknown) =>
-  typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+const text = (v: unknown) => clean(v, 120);
 
 function feesOf(o: Obj): MerchantFact['fees'] {
   const methods = Array.isArray(o.deliveryMethods)

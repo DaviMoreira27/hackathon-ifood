@@ -24,6 +24,7 @@ import {
   PAYMENTS_RETRY_QUEUE,
   type PaymentConfirmedEvent,
 } from './topology.js';
+import { appConfig } from '../config/app-config.js';
 
 export interface PaymentEventsConsumerOptions {
   url: string;
@@ -41,7 +42,7 @@ export const PAYMENT_EVENTS_OPTIONS = Symbol('PAYMENT_EVENTS_OPTIONS');
 
 export function defaultConsumerOptions(): PaymentEventsConsumerOptions {
   return {
-    url: process.env.RABBITMQ_URL ?? 'amqp://ifood:ifood@localhost:5672',
+    url: appConfig().payments.rabbitmqUrl,
     queue: PAYMENTS_QUEUE,
     retryQueue: PAYMENTS_RETRY_QUEUE,
     dlq: PAYMENTS_DLQ,

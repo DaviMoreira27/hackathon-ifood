@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { and, count, eq, ne } from 'drizzle-orm';
 import { DbService } from '../db/db.service.js';
 import {
@@ -15,6 +16,8 @@ import {
   type CancelResult,
 } from './payment-provider.client.js';
 import type { PaymentConfirmedEvent } from './topology.js';
+import { PAYMENT_APPLIED } from '../common/events.js';
+import { appConfig } from '../config/app-config.js';
 
 // O evento não pode ser aplicado nunca (dado inconsistente): vai para a DLQ em vez de ser repetido.
 export class UnrecoverableEventError extends Error {}
@@ -32,26 +35,21 @@ export interface PaymentApplied {
   ownerChatId: number | null;
 }
 
-type Listener = (applied: PaymentApplied) => void | Promise<void>;
 type IssuedListener = (orderId: number) => Promise<void>;
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
-  private readonly listeners: Listener[] = [];
   private readonly issuedListeners: IssuedListener[] = [];
 
   constructor(
     private readonly database: DbService,
     private readonly provider: PaymentProviderClient,
+    private readonly events: EventEmitter2,
   ) {}
 
   private get db() {
     return this.database.db;
-  }
-
-  onPaymentApplied(listener: Listener): void {
-    this.listeners.push(listener);
   }
 
   onChargesIssued(listener: IssuedListener): void {
@@ -78,12 +76,11 @@ export class PaymentsService {
     amountCents: number;
     description: string;
   }): Promise<string> {
-    const ttl = Number(process.env.PAYMENT_TTL_MINUTES ?? 24 * 60);
     const charge = await this.provider.createCharge({
       reference: String(payment.id),
       amountCents: payment.amountCents,
       description: payment.description,
-      expiresInMinutes: Number.isInteger(ttl) && ttl > 0 ? ttl : 24 * 60,
+      expiresInMinutes: appConfig().payments.ttlMinutes,
     });
     const payUrl = this.buildPayUrl(charge.token);
     await this.db
@@ -103,12 +100,10 @@ export class PaymentsService {
 
   // O link aponta para o front (que roda no mesmo computador): ex.: http://localhost:5173/pay/{token}
   buildPayUrl(token: string): string {
-    const template =
-      process.env.PAYMENT_LINK_TEMPLATE ?? 'http://localhost:5173/pay/{token}';
-    if (!template.includes('{token}')) {
-      throw new Error('PAYMENT_LINK_TEMPLATE precisa conter {token}');
-    }
-    return template.replace('{token}', encodeURIComponent(token));
+    return appConfig().payments.linkTemplate.replace(
+      '{token}',
+      encodeURIComponent(token),
+    );
   }
 
   // Aplica `payment.confirmed`. Idempotente e seguro com eventos simultâneos do mesmo pedido:
@@ -252,14 +247,12 @@ export class PaymentsService {
           `${applied.cartPaid ? ', carrinho pago' : ''}${applied.orderPaid ? ', PEDIDO PAGO' : ''}`,
       );
       // Depois do commit: uma falha ao avisar o Telegram não desfaz o pagamento.
-      for (const listener of this.listeners) {
-        try {
-          await listener(applied);
-        } catch (err) {
-          this.logger.error(
-            `Falha ao notificar o pagamento ${applied.paymentId}: ${String(err)}`,
-          );
-        }
+      try {
+        await this.events.emitAsync(PAYMENT_APPLIED, applied);
+      } catch (err) {
+        this.logger.error(
+          `Falha ao notificar o pagamento ${applied.paymentId}: ${String(err)}`,
+        );
       }
     }
     return applied;

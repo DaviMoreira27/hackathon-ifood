@@ -5,7 +5,8 @@ import {
   parseCart,
   triggersCartSync,
 } from './cart-sync.js';
-import { wrapToolResult } from './tool-policy.js';
+import { wrapToolResult } from './tool-envelope.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 const cartJson = (overrides: Record<string, unknown> = {}) =>
   JSON.stringify({
@@ -32,6 +33,7 @@ const cartJson = (overrides: Record<string, unknown> = {}) =>
 describe('cart-sync', () => {
   afterEach(() => {
     delete process.env.MCP_CART_SYNC_TOOLS;
+    resetAppConfig();
   });
 
   it('dispara nas alterações de carrinho, não em leituras', () => {
@@ -40,6 +42,7 @@ describe('cart-sync', () => {
     expect(triggersCartSync('getCart')).toBe(false);
     expect(triggersCartSync('createCart')).toBe(false);
     process.env.MCP_CART_SYNC_TOOLS = 'add_item';
+    resetAppConfig();
     expect(triggersCartSync('add_item')).toBe(true);
     expect(triggersCartSync('addItemToCart')).toBe(false);
   });

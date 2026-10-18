@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { eq, inArray } from 'drizzle-orm';
 import { createPayingOrder, deleteTestUsers } from '../../test/fixtures.js';
 import { DbService } from '../db/db.service.js';
@@ -8,6 +9,8 @@ import {
   UnrecoverableEventError,
 } from './payments.service.js';
 import { PAYMENT_CONFIRMED, type PaymentConfirmedEvent } from './topology.js';
+import { PAYMENT_APPLIED } from '../common/events.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 // Roda contra um Postgres real (schema de db/init.sql). Exemplo:
 //   TEST_DATABASE_URL=postgresql://ifood:ifood@localhost:5433/ifood npm test
@@ -19,6 +22,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     let nextChat = 0;
     let database: DbService;
     let service: PaymentsService;
+    let events: EventEmitter2;
     let applied: unknown[];
 
     const event = (
@@ -55,14 +59,20 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
 
     beforeAll(() => {
       process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+      resetAppConfig();
       database = new DbService();
     });
 
     // Serviço novo a cada teste: os listeners não vazam de um teste para o outro.
     beforeEach(() => {
       applied = [];
-      service = new PaymentsService(database, new PaymentProviderClient());
-      service.onPaymentApplied((a) => void applied.push(a));
+      events = new EventEmitter2();
+      service = new PaymentsService(
+        database,
+        new PaymentProviderClient(),
+        events,
+      );
+      events.on(PAYMENT_APPLIED, (a: unknown) => void applied.push(a));
     });
 
     afterAll(async () => {
@@ -264,7 +274,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         },
       ]);
       const paymentId = order.carts[0].payers[0].paymentId;
-      service.onPaymentApplied(() => {
+      events.on(PAYMENT_APPLIED, () => {
         throw new Error('telegram fora do ar');
       });
 

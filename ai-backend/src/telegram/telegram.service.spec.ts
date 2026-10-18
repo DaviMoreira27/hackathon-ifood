@@ -4,8 +4,7 @@ import {
   TelegramService,
 } from './telegram.service.js';
 import type { AgentService } from '../agent/agent.service.js';
-import type { AuthService } from '../auth/auth.service.js';
-import type { PaymentsService } from '../payments/payments.service.js';
+import { resetAppConfig } from '../config/app-config.js';
 
 type Handler = (payload: unknown) => void;
 
@@ -37,14 +36,11 @@ describe('TelegramService (botões de confirmação)', () => {
 
   beforeEach(() => {
     process.env.TELEGRAM_BOT_TOKEN = 'test';
+    resetAppConfig();
     bot.handlers.clear();
     vi.clearAllMocks();
     agent = { handleRich: vi.fn() };
-    service = new TelegramService(
-      agent as unknown as AgentService,
-      { onLogin: vi.fn() } as unknown as AuthService,
-      { onPaymentApplied: vi.fn() } as unknown as PaymentsService,
-    );
+    service = new TelegramService(agent as unknown as AgentService);
     service.onModuleInit();
   });
 
