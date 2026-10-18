@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { eq, like } from 'drizzle-orm';
+import { createTestChats, deleteTestUsers } from '../../test/fixtures.js';
 import { DbService } from '../db/db.service.js';
 import { oauthPendingLogins } from '../db/schema.js';
 import { TokenCipher } from '../users/token-cipher.js';
@@ -12,30 +13,33 @@ import { resetAppConfig } from '../config/app-config.js';
 // Roda contra um Postgres real:  TEST_DATABASE_URL=... npm test
 describe.skipIf(!process.env.TEST_DATABASE_URL)('PendingLoginsService', () => {
   const PREFIX = `t${Date.now()}-`;
+  const CHAT = 6_000_000_000 + Math.floor(Math.random() * 1_000_000);
   let database: DbService;
   let service: PendingLoginsService;
   let seq = 0;
   const state = () => `${PREFIX}${++seq}`;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
     process.env.TOKEN_ENCRYPTION_KEY = randomBytes(32).toString('base64');
     resetAppConfig();
     database = new DbService();
     service = new PendingLoginsService(database, new TokenCipher());
+    await createTestChats(database.db, [CHAT]);
   });
 
   afterAll(async () => {
     await database.db
       .delete(oauthPendingLogins)
       .where(like(oauthPendingLogins.state, `${PREFIX}%`));
+    await deleteTestUsers(database.db, [CHAT]);
     await database.onModuleDestroy();
   });
 
   it('guarda o login (verifier cifrado) e devolve na volta', async () => {
     const s = state();
     await service.save(s, {
-      chatId: 42,
+      chatId: CHAT,
       codeVerifier: 'verifier-super-secreto',
     });
 
@@ -43,19 +47,19 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('PendingLoginsService', () => {
       .select()
       .from(oauthPendingLogins)
       .where(eq(oauthPendingLogins.state, s));
-    expect(row.chatId).toBe(42);
+    expect(row.chatId).toBe(CHAT);
     expect(row.codeVerifierEnc).toMatch(/^v1:/);
     expect(row.codeVerifierEnc).not.toContain('verifier-super-secreto');
 
     expect(await service.consume(s)).toEqual({
-      chatId: 42,
+      chatId: CHAT,
       codeVerifier: 'verifier-super-secreto',
     });
   });
 
   it('é de uso único, também com acessos simultâneos ao callback', async () => {
     const s = state();
-    await service.save(s, { chatId: 7, codeVerifier: 'v' });
+    await service.save(s, { chatId: CHAT, codeVerifier: 'v' });
 
     const results = await Promise.all(
       Array.from({ length: 8 }, () => service.consume(s)),
@@ -69,7 +73,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('PendingLoginsService', () => {
     expect(await service.consume(state())).toBeNull();
 
     const expired = state();
-    await service.save(expired, { chatId: 1, codeVerifier: 'v' });
+    await service.save(expired, { chatId: CHAT, codeVerifier: 'v' });
     await database.db
       .update(oauthPendingLogins)
       .set({ createdAt: new Date(Date.now() - PENDING_LOGIN_TTL_MS - 1000) })
@@ -77,9 +81,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('PendingLoginsService', () => {
     expect(await service.consume(expired)).toBeNull();
 
     const tampered = state();
-    await service.save(tampered, { chatId: 1, codeVerifier: 'v' });
+    await service.save(tampered, { chatId: CHAT, codeVerifier: 'v' });
     const other = state();
-    await service.save(other, { chatId: 1, codeVerifier: 'outro' });
+    await service.save(other, { chatId: CHAT, codeVerifier: 'outro' });
     const [otherRow] = await database.db
       .select()
       .from(oauthPendingLogins)
@@ -94,13 +98,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('PendingLoginsService', () => {
 
   it('salvar limpa os logins que já expiraram', async () => {
     const old = state();
-    await service.save(old, { chatId: 1, codeVerifier: 'v' });
+    await service.save(old, { chatId: CHAT, codeVerifier: 'v' });
     await database.db
       .update(oauthPendingLogins)
       .set({ createdAt: new Date(Date.now() - PENDING_LOGIN_TTL_MS - 1000) })
       .where(eq(oauthPendingLogins.state, old));
 
-    await service.save(state(), { chatId: 1, codeVerifier: 'v' });
+    await service.save(state(), { chatId: CHAT, codeVerifier: 'v' });
 
     const rows = await database.db
       .select()

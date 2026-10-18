@@ -4,6 +4,8 @@ import {
   TelegramService,
 } from './telegram.service.js';
 import type { AgentService } from '../agent/agent.service.js';
+import type { ChatsService } from '../chats/chats.service.js';
+import type { PaymentApplied } from '../payments/payments.service.js';
 import { resetAppConfig } from '../config/app-config.js';
 
 type Handler = (payload: unknown) => void;
@@ -27,11 +29,17 @@ vi.mock('node-telegram-bot-api', () => ({
 }));
 
 const CHAT = 99;
+// chats.id do chat 99 do Telegram.
+const INTERNAL = 501;
 // O handler do bot dispara sem await: espera a fila de microtasks esvaziar.
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('TelegramService (botões de confirmação)', () => {
   let agent: { handleRich: ReturnType<typeof vi.fn> };
+  let chats: {
+    resolve: ReturnType<typeof vi.fn>;
+    address: ReturnType<typeof vi.fn>;
+  };
   let service: TelegramService;
 
   beforeEach(() => {
@@ -40,7 +48,14 @@ describe('TelegramService (botões de confirmação)', () => {
     bot.handlers.clear();
     vi.clearAllMocks();
     agent = { handleRich: vi.fn() };
-    service = new TelegramService(agent as unknown as AgentService);
+    chats = {
+      resolve: vi.fn().mockResolvedValue(INTERNAL),
+      address: vi.fn(),
+    };
+    service = new TelegramService(
+      agent as unknown as AgentService,
+      chats as unknown as ChatsService,
+    );
     service.onModuleInit();
   });
 
@@ -98,7 +113,7 @@ describe('TelegramService (botões de confirmação)', () => {
       { inline_keyboard: [] },
       { chat_id: CHAT, message_id: 7 },
     );
-    expect(agent.handleRich).toHaveBeenCalledWith(CHAT, 'confirmar', {
+    expect(agent.handleRich).toHaveBeenCalledWith(INTERNAL, 'confirmar', {
       name: 'Ana',
     });
   });
@@ -114,7 +129,7 @@ describe('TelegramService (botões de confirmação)', () => {
     });
     await flush();
 
-    expect(agent.handleRich).toHaveBeenCalledWith(CHAT, 'cancelar', {
+    expect(agent.handleRich).toHaveBeenCalledWith(INTERNAL, 'cancelar', {
       name: undefined,
     });
   });
@@ -130,5 +145,46 @@ describe('TelegramService (botões de confirmação)', () => {
 
     expect(bot.answerCallbackQuery).toHaveBeenCalledWith('q3', {});
     expect(agent.handleRich).not.toHaveBeenCalled();
+  });
+
+  it('traduz o chat do Telegram para o chatId interno antes de chamar o agente', async () => {
+    agent.handleRich.mockResolvedValue({ text: 'oi', images: [] });
+
+    bot.handlers.get('message')!({ chat: { id: CHAT }, text: 'oi' });
+    await flush();
+
+    expect(chats.resolve).toHaveBeenCalledWith('telegram', String(CHAT));
+    expect(agent.handleRich).toHaveBeenCalledWith(INTERNAL, 'oi', {
+      name: undefined,
+    });
+    expect(bot.sendMessage.mock.calls.at(-1)![0]).toBe(CHAT);
+  });
+
+  it('avisos de login e pagamento só saem para chats do Telegram', async () => {
+    const applied = {
+      participantName: 'Ana',
+      amountCents: 1000,
+      restaurantName: null,
+      cartPaid: false,
+      orderPaid: false,
+      pendingParticipants: [],
+      ownerChatId: INTERNAL,
+    } as unknown as PaymentApplied;
+
+    chats.address.mockResolvedValue({
+      channel: 'whatsapp',
+      externalId: '5511999999999',
+    });
+    await service.onUserLoggedIn({ chatId: INTERNAL });
+    await service.onPaymentApplied(applied);
+    expect(bot.sendMessage).not.toHaveBeenCalled();
+
+    chats.address.mockResolvedValue({
+      channel: 'telegram',
+      externalId: String(CHAT),
+    });
+    await service.onUserLoggedIn({ chatId: INTERNAL });
+    await service.onPaymentApplied(applied);
+    expect(bot.sendMessage.mock.calls.map((c) => c[0])).toEqual([CHAT, CHAT]);
   });
 });

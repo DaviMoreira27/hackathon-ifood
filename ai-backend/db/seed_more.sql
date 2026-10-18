@@ -43,6 +43,11 @@ SELECT
 FROM base;
 
 -- ~12 mensagens por usuário (conversas user/assistant/tool)
+INSERT INTO chats (id, channel, external_id)
+SELECT 5000 + u.id, 'telegram', (5000 + u.id)::text FROM users u
+ON CONFLICT DO NOTHING;
+SELECT setval('chats_id_seq', (SELECT max(id) FROM chats));
+
 INSERT INTO messages (chat_id, user_id, role, content, created_at)
 SELECT
   5000 + u.id,

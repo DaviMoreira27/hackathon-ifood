@@ -1,5 +1,5 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type Anthropic from '@anthropic-ai/sdk';
 import { TurnTracesService } from '../agent/turn-traces.service.js';
 import { DEFAULT_AGENT_CONFIG } from '../agent/agent.config.js';
@@ -16,8 +16,9 @@ import { PaymentsService } from '../payments/payments.service.js';
 import { MessagesService } from '../messages/messages.service.js';
 import { TokenCipher } from '../users/token-cipher.js';
 import { UsersService } from '../users/users.service.js';
+import { createTestChats, deleteTestUsers } from '../../test/fixtures.js';
 import { DbService } from './db.service.js';
-import { carts, messages, orders, users } from './schema.js';
+import { carts, orders } from './schema.js';
 import { resetAppConfig } from '../config/app-config.js';
 
 // Roda contra um Postgres real (schema de db/init.sql). Exemplo:
@@ -29,7 +30,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
   let usersService: UsersService;
   let messagesService: MessagesService;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
     resetAppConfig();
     database = new DbService();
@@ -37,29 +38,20 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
     resetAppConfig();
     usersService = new UsersService(database, new TokenCipher());
     messagesService = new MessagesService(database);
+    await createTestChats(database.db, [CHAT, CHAT + 1]);
   });
 
   afterAll(async () => {
-    const { db } = database;
-    const owned = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(inArray(users.telegramChatId, [CHAT, CHAT + 1]));
-    const ids = owned.map((u) => u.id);
-    await db.delete(messages).where(inArray(messages.chatId, [CHAT, CHAT + 1]));
-    if (ids.length) {
-      await db.delete(orders).where(inArray(orders.ownerUserId, ids)); // carts caem em cascata
-      await db.delete(users).where(inArray(users.id, ids));
-    }
+    await deleteTestUsers(database.db, [CHAT, CHAT + 1]);
     await database.onModuleDestroy();
   });
 
-  it('getOrCreateByTelegram é idempotente, inclusive com chamadas simultâneas', async () => {
+  it('getOrCreateByChat é idempotente, inclusive com chamadas simultâneas', async () => {
     const [a, b] = await Promise.all([
-      usersService.getOrCreateByTelegram(CHAT, 'Davi'),
-      usersService.getOrCreateByTelegram(CHAT, 'Davi'),
+      usersService.getOrCreateByChat(CHAT, 'Davi'),
+      usersService.getOrCreateByChat(CHAT, 'Davi'),
     ]);
-    const again = await usersService.getOrCreateByTelegram(CHAT, 'Outro Nome');
+    const again = await usersService.getOrCreateByChat(CHAT, 'Outro Nome');
 
     expect(a.id).toBe(b.id);
     expect(again.id).toBe(a.id);
@@ -97,12 +89,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
       refreshToken: 'r',
       expiresAt: new Date(Date.now() + 1000),
     });
-    const user = await usersService.findByTelegramChatId(CHAT + 1);
-    expect(user?.name).toBe(`Telegram ${CHAT + 1}`);
+    const user = await usersService.findByChatId(CHAT + 1);
+    expect(user?.name).toBe(`Chat ${CHAT + 1}`);
   });
 
   it('mensagens: mantém a ordem, a janela e o payload jsonb', async () => {
-    const user = (await usersService.findByTelegramChatId(CHAT))!;
+    const user = (await usersService.findByChatId(CHAT))!;
     const toolUse = [
       { type: 'tool_use', id: 'x', name: 'search', input: { q: 1 } },
     ];
@@ -148,7 +140,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
   });
 
   it('pedidos e carrinhos: defaults do schema e cascata', async () => {
-    const user = (await usersService.findByTelegramChatId(CHAT))!;
+    const user = (await usersService.findByChatId(CHAT))!;
     const { db } = database;
 
     const [order] = await db

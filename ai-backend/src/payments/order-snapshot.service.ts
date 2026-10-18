@@ -123,7 +123,7 @@ export class OrderSnapshotService implements OnModuleInit {
     const result = new Map<string, McpCartInfo>();
     try {
       const [owner] = await this.db
-        .select({ chatId: users.telegramChatId })
+        .select({ chatId: users.chatId })
         .from(orders)
         .innerJoin(users, eq(users.id, orders.ownerUserId))
         .where(eq(orders.id, orderId));

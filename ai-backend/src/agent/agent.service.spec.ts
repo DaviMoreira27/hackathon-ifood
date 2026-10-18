@@ -126,7 +126,7 @@ describe('AgentService', () => {
       callTool: vi.fn(),
       drop: vi.fn(),
     };
-    users = { getOrCreateByTelegram: vi.fn().mockResolvedValue({ id: 7 }) };
+    users = { getOrCreateByChat: vi.fn().mockResolvedValue({ id: 7 }) };
     groupTools = {
       has: vi.fn((name: string) => name.startsWith('group_')),
       mergeTools: vi.fn((mcpTools: unknown[]) => [
@@ -163,12 +163,12 @@ describe('AgentService', () => {
     );
   });
 
-  it('cria o usuário com o nome do perfil do Telegram', async () => {
+  it('cria o usuário com o nome do perfil do chat', async () => {
     create.mockResolvedValue(textReply('ok'));
 
     await agent.handle(CHAT, 'oi', { name: 'Davi' });
 
-    expect(users.getOrCreateByTelegram).toHaveBeenCalledWith(CHAT, 'Davi');
+    expect(users.getOrCreateByChat).toHaveBeenCalledWith(CHAT, 'Davi');
   });
 
   it('sem token, devolve o link, grava só um marcador e não chama LLM nem MCP', async () => {
@@ -868,7 +868,7 @@ describe('AgentService', () => {
       );
     });
 
-    it('o nome do perfil do Telegram vai no estado do pedido', async () => {
+    it('o nome do perfil do chat vai no estado do pedido', async () => {
       create.mockResolvedValue(textReply('ok'));
 
       await agent.handle(CHAT, 'oi', { name: 'Davi' });

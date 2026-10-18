@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
+import { createTestChats, deleteTestUsers } from '../../test/fixtures.js';
 import { DbService } from '../db/db.service.js';
 import { users } from '../db/schema.js';
 import { TokenCipher } from './token-cipher.js';
@@ -12,41 +13,32 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
   () => {
     const BASE = 3_000_000_000 + Math.floor(Math.random() * 1_000_000) * 10;
     const KEY = randomBytes(32).toString('base64');
-    const chats: number[] = [];
+    // Os chats precisam existir antes (FK): newChat() entrega um destes, criados no beforeAll.
+    const chats = Array.from({ length: 9 }, (_, i) => BASE + i + 1);
     let database: DbService;
     let service: UsersService;
     let seq = 0;
 
-    const newChat = () => {
-      const chat = BASE + ++seq;
-      chats.push(chat);
-      return chat;
-    };
+    const newChat = () => chats[seq++];
     const rawRow = async (chat: number) =>
-      (
-        await database.db
-          .select()
-          .from(users)
-          .where(eq(users.telegramChatId, chat))
-      )[0];
+      (await database.db.select().from(users).where(eq(users.chatId, chat)))[0];
     const tokens = (suffix = '') => ({
       accessToken: `eyJhbGciOiJSUzI1NiJ9.acesso-secreto${suffix}.sig`,
       refreshToken: `eyJhbGciOiJSUzI1NiJ9.refresh-secreto${suffix}.sig`,
       expiresAt: new Date(Date.now() + 3600_000),
     });
 
-    beforeAll(() => {
+    beforeAll(async () => {
       process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
       process.env.TOKEN_ENCRYPTION_KEY = KEY;
       resetAppConfig();
       database = new DbService();
       service = new UsersService(database, new TokenCipher());
+      await createTestChats(database.db, chats);
     });
 
     afterAll(async () => {
-      await database.db
-        .delete(users)
-        .where(inArray(users.telegramChatId, chats));
+      await deleteTestUsers(database.db, chats);
       await database.onModuleDestroy();
     });
 
@@ -93,7 +85,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           ifoodToken: stolen.ifoodToken,
           ifoodRefreshToken: stolen.ifoodRefreshToken,
         })
-        .where(eq(users.telegramChatId, attacker));
+        .where(eq(users.chatId, attacker));
 
       expect(await service.getIfoodTokens(attacker)).toBeNull();
     });
@@ -113,7 +105,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       await database.db
         .update(users)
         .set({ ifoodToken: `${row.ifoodToken!.slice(0, -2)}AA` })
-        .where(eq(users.telegramChatId, chat));
+        .where(eq(users.chatId, chat));
       expect(await service.getIfoodTokens(chat)).toBeNull();
     });
 
@@ -122,7 +114,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       const legacy = tokens('-legado');
       await database.db.insert(users).values({
         name: 'Legado',
-        telegramChatId: chat,
+        chatId: chat,
         ifoodToken: legacy.accessToken,
         ifoodRefreshToken: legacy.refreshToken,
         tokenExpiresAt: legacy.expiresAt,

@@ -38,12 +38,30 @@ export const paymentStatus = pgEnum('payment_status', [
   'void',
 ]);
 
+export type ChatChannel = 'telegram' | 'whatsapp';
+
+// id é o chatId interno usado no resto do código; external_id é o id do chat no canal.
+export const chats = pgTable(
+  'chats',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    channel: text('channel').$type<ChatChannel>().notNull(),
+    externalId: text('external_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex().on(t.channel, t.externalId)],
+);
+
 export const users = pgTable('users', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   name: text('name').notNull(),
-  // Nulo até sabermos o e-mail: o usuário nasce no primeiro contato pelo Telegram.
+  // Nulo até sabermos o e-mail: o usuário nasce no primeiro contato pelo chat.
   email: text('email').unique(),
-  telegramChatId: bigint('telegram_chat_id', { mode: 'number' }).unique(),
+  chatId: bigint('chat_id', { mode: 'number' })
+    .unique()
+    .references(() => chats.id),
   // ifoodToken = access token do OAuth do iFood.
   ifoodToken: text('ifood_token'),
   ifoodRefreshToken: text('ifood_refresh_token'),
@@ -75,7 +93,9 @@ export const carts = pgTable('carts', {
 
 export const messages = pgTable('messages', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+  chatId: bigint('chat_id', { mode: 'number' })
+    .notNull()
+    .references(() => chats.id, { onDelete: 'cascade' }),
   userId: bigint('user_id', { mode: 'number' }).references(() => users.id),
   role: messageRole('role').notNull(),
   // Texto legível (o que o usuário viu ou um resumo da ferramenta).
@@ -87,7 +107,7 @@ export const messages = pgTable('messages', {
     .defaultNow(),
 });
 
-// O DDL de verdade está em db/init.sql (e db/migrations): aqui ficam só os tipos para as queries.
+// O DDL de verdade está em db/init.sql: aqui ficam só os tipos para as queries.
 
 export const participants = pgTable('participants', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
@@ -176,7 +196,9 @@ export const processedEvents = pgTable('processed_events', {
 
 export const oauthPendingLogins = pgTable('oauth_pending_logins', {
   state: text('state').primaryKey(),
-  chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+  chatId: bigint('chat_id', { mode: 'number' })
+    .notNull()
+    .references(() => chats.id, { onDelete: 'cascade' }),
   // code_verifier do PKCE, cifrado.
   codeVerifierEnc: text('code_verifier_enc').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true })
@@ -215,7 +237,9 @@ export interface TraceTool {
 
 export const agentTurns = pgTable('agent_turns', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+  chatId: bigint('chat_id', { mode: 'number' })
+    .notNull()
+    .references(() => chats.id, { onDelete: 'cascade' }),
   userId: bigint('user_id', { mode: 'number' }).references(() => users.id, {
     onDelete: 'set null',
   }),

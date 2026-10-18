@@ -31,7 +31,7 @@ export interface PaymentApplied {
   cartPaid: boolean;
   orderPaid: boolean;
   pendingParticipants: string[];
-  // Chat do dono do pedido, para avisar no Telegram (nulo se o dono não veio do Telegram).
+  // Chat do dono do pedido (chats.id), para avisá-lo no canal dele.
   ownerChatId: number | null;
 }
 
@@ -224,7 +224,7 @@ export class PaymentsService {
           and(eq(carts.orderId, order.id), eq(payments.status, 'pending')),
         );
       const [owner] = await tx
-        .select({ chatId: users.telegramChatId })
+        .select({ chatId: users.chatId })
         .from(users)
         .where(eq(users.id, order.ownerUserId));
 
@@ -246,7 +246,7 @@ export class PaymentsService {
         `[evento] pagamento ${applied.paymentId} (${applied.participantName}) aplicado` +
           `${applied.cartPaid ? ', carrinho pago' : ''}${applied.orderPaid ? ', PEDIDO PAGO' : ''}`,
       );
-      // Depois do commit: uma falha ao avisar o Telegram não desfaz o pagamento.
+      // Depois do commit: uma falha ao avisar o chat não desfaz o pagamento.
       try {
         await this.events.emitAsync(PAYMENT_APPLIED, applied);
       } catch (err) {

@@ -49,7 +49,7 @@ export class UsersService implements OnModuleInit {
       .from(users)
       .where(
         and(
-          isNotNull(users.telegramChatId),
+          isNotNull(users.chatId),
           or(
             and(isNotNull(users.ifoodToken), notLike(users.ifoodToken, 'v1:%')),
             and(
@@ -60,7 +60,7 @@ export class UsersService implements OnModuleInit {
         ),
       );
     for (const user of legacy) {
-      const chatId = user.telegramChatId as number;
+      const chatId = user.chatId as number;
       await this.db
         .update(users)
         .set({
@@ -81,31 +81,31 @@ export class UsersService implements OnModuleInit {
     return legacy.length;
   }
 
-  async findByTelegramChatId(chatId: number): Promise<User | undefined> {
+  async findByChatId(chatId: number): Promise<User | undefined> {
     const [user] = await this.db
       .select()
       .from(users)
-      .where(eq(users.telegramChatId, chatId));
+      .where(eq(users.chatId, chatId));
     return user;
   }
 
-  async getOrCreateByTelegram(chatId: number, name?: string): Promise<User> {
-    const existing = await this.findByTelegramChatId(chatId);
+  async getOrCreateByChat(chatId: number, name?: string): Promise<User> {
+    const existing = await this.findByChatId(chatId);
     if (existing) return existing;
 
     // onConflictDoNothing cobre duas mensagens do mesmo chat chegando juntas.
     await this.db
       .insert(users)
       .values({
-        name: name?.trim() || `Telegram ${chatId}`,
-        telegramChatId: chatId,
+        name: name?.trim() || `Chat ${chatId}`,
+        chatId,
       })
-      .onConflictDoNothing({ target: users.telegramChatId });
-    return (await this.findByTelegramChatId(chatId))!;
+      .onConflictDoNothing({ target: users.chatId });
+    return (await this.findByChatId(chatId))!;
   }
 
   async getIfoodTokens(chatId: number): Promise<IfoodTokens | null> {
-    const user = await this.findByTelegramChatId(chatId);
+    const user = await this.findByChatId(chatId);
     if (!user?.ifoodToken || !user.ifoodRefreshToken || !user.tokenExpiresAt) {
       return null;
     }
@@ -133,18 +133,18 @@ export class UsersService implements OnModuleInit {
     await this.db
       .insert(users)
       .values({
-        name: `Telegram ${chatId}`,
-        telegramChatId: chatId,
+        name: `Chat ${chatId}`,
+        chatId,
         ...columns,
       })
-      .onConflictDoUpdate({ target: users.telegramChatId, set: columns });
+      .onConflictDoUpdate({ target: users.chatId, set: columns });
   }
 
   async clearIfoodTokens(chatId: number): Promise<void> {
     await this.db
       .update(users)
       .set({ ifoodToken: null, ifoodRefreshToken: null, tokenExpiresAt: null })
-      .where(eq(users.telegramChatId, chatId));
+      .where(eq(users.chatId, chatId));
   }
 
   private protect(

@@ -122,7 +122,7 @@ describe('AgentService — segurança', () => {
       } as unknown as AuthService,
       mcp as unknown as McpService,
       {
-        getOrCreateByTelegram: vi.fn().mockResolvedValue({ id: 7 }),
+        getOrCreateByChat: vi.fn().mockResolvedValue({ id: 7 }),
       } as unknown as UsersService,
       db as unknown as MessagesService,
       groupTools as unknown as GroupOrderTools,

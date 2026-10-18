@@ -35,7 +35,7 @@ export interface AgentReply {
   text: string;
   // Fotos de pratos/lojas escolhidas pelo LLM e validadas pelo código (ver images.ts).
   images: ReplyImage[];
-  // Uma ação sensível ficou esperando o "confirmar" (o Telegram mostra os botões).
+  // Uma ação sensível ficou esperando o "confirmar" (o canal mostra os botões).
   awaitingConfirmation?: boolean;
 }
 
@@ -135,7 +135,7 @@ export class AgentService {
       // agora chama a ferramenta e o sistema pede a confirmação de verdade (com os botões).
     }
 
-    const user = await this.users.getOrCreateByTelegram(chatId, profile?.name);
+    const user = await this.users.getOrCreateByChat(chatId, profile?.name);
     await this.store.addText(chatId, user.id, 'user', text);
 
     const token = await this.auth.getValidAccessToken(chatId);

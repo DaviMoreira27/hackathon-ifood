@@ -14,10 +14,10 @@
 ./dev.sh down      # para tudo (os dados do banco ficam)
 ```
 
-O `up` faz, nesta ordem: Postgres e RabbitMQ em containers (docker ou podman, o que existir) → cria o banco se não existir e roda as migrações que faltam (`ai-backend/db/migrate.sh`) → mock do iFood (porta 3001) → `ai-backend` (porta 3000) → front do pagador (porta 5173).
+O `up` faz, nesta ordem: Postgres e RabbitMQ em containers (docker ou podman, o que existir) → cria o banco e aplica o schema se ele estiver vazio (`ai-backend/db/setup.sh`; não há migrações, o schema vive em `ai-backend/db/init.sql` e mudanças nele pedem `./dev.sh reset --yes`) → mock do iFood (porta 3001) → `ai-backend` (porta 3000) → front do pagador (porta 5173).
 
 - Antes do primeiro `up`, preencha `ai-backend/.env` (se não existir, o script cria a partir do exemplo e avisa o que falta). O `.env` do mock é criado sozinho.
 - O front do pagador também sobe pelo script (porta 5173, `FRONT_PORT` para trocar). Se não houver `frontend/.env.local` nem `frontend/.env`, o script cria `frontend/.env.local` com `NEXT_PUBLIC_API_URL=http://localhost:3001`. O link enviado no Telegram vem de `PAYMENT_LINK_TEMPLATE` (padrão `http://localhost:5173/pay/{token}`). Ele consome `GET /orders/by-token/:token`, `GET /payments/by-token/:token` e `POST /payments/by-token/:token/pay` no mock.
 - Ao emitir as cobranças, o ai-backend envia o pedido ao mock (`PUT /orders/:id`, com `x-api-key`), juntando o banco com o `getCart` do MCP.
-- Outros comandos: `./dev.sh migrate` (só migrações), `./dev.sh restart` (reinicia os backends e o front) e `./dev.sh reset --yes` (**apaga** banco e filas e recomeça do zero).
+- Outros comandos: `./dev.sh restart` (reinicia os backends e o front) e `./dev.sh reset --yes` (**apaga** banco e filas e recomeça do zero).
 - Testes de integração (Postgres/RabbitMQ reais) ficam pulados sem `TEST_DATABASE_URL`, `TEST_RABBITMQ_URL` e `TEST_MOCK_URL` (ver os cabeçalhos dos `*.spec.ts`).

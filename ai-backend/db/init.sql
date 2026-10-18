@@ -3,11 +3,21 @@ CREATE TYPE cart_status  AS ENUM ('pending', 'confirmed', 'paid');
 CREATE TYPE message_role AS ENUM ('user', 'assistant', 'tool');
 CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'void');
 
+-- Conversa num canal de mensagens. id é o chatId interno; external_id é o id do canal
+-- (chat id do Telegram, wa_id do WhatsApp).
+CREATE TABLE chats (
+  id          BIGSERIAL PRIMARY KEY,
+  channel     TEXT NOT NULL CHECK (channel IN ('telegram', 'whatsapp')),
+  external_id TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (channel, external_id)
+);
+
 CREATE TABLE users (
   id               BIGSERIAL PRIMARY KEY,
   name             TEXT NOT NULL,
   email            TEXT UNIQUE,
-  telegram_chat_id BIGINT UNIQUE,
+  chat_id          BIGINT UNIQUE REFERENCES chats(id),
   ifood_token      TEXT,
   ifood_refresh_token TEXT,
   token_expires_at TIMESTAMPTZ
@@ -32,7 +42,7 @@ CREATE TABLE carts (
 
 CREATE TABLE messages (
   id         BIGSERIAL PRIMARY KEY,
-  chat_id    BIGINT NOT NULL,
+  chat_id    BIGINT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   user_id    BIGINT REFERENCES users(id),
   role       message_role NOT NULL,
   content    TEXT NOT NULL,
@@ -96,7 +106,7 @@ CREATE TABLE processed_events (
 -- Logins OAuth em andamento (PKCE); o code_verifier fica cifrado.
 CREATE TABLE oauth_pending_logins (
   state             TEXT PRIMARY KEY,
-  chat_id           BIGINT NOT NULL,
+  chat_id           BIGINT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   code_verifier_enc TEXT NOT NULL,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -119,7 +129,7 @@ CREATE TABLE dietary_restrictions (
 -- Trace de cada turno do agente (ferramentas, tokens, latência, validadores, onde parou).
 CREATE TABLE agent_turns (
   id                 BIGSERIAL PRIMARY KEY,
-  chat_id            BIGINT NOT NULL,
+  chat_id            BIGINT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   user_id            BIGINT REFERENCES users(id) ON DELETE SET NULL,
   started_at         TIMESTAMPTZ NOT NULL,
   duration_ms        INTEGER NOT NULL,

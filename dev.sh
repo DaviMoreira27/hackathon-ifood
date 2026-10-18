@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Sobe (e derruba) o ambiente local inteiro, tudo neste computador:
-#   Postgres + RabbitMQ (containers) → migrações do banco → mock do iFood → ai-backend → front
+#   Postgres + RabbitMQ (containers) → schema do banco → mock do iFood → ai-backend → front
 #
 #   ./dev.sh up              sobe o que não estiver no ar (pode rodar quantas vezes quiser)
 #   ./dev.sh down            para os backends e os containers (os dados do banco ficam)
 #   ./dev.sh status          mostra o que está no ar
 #   ./dev.sh logs [serviço]  acompanha os logs (ai-backend | ifood-backend | frontend; sem argumento, todos)
-#   ./dev.sh migrate         só roda as migrações pendentes (os containers precisam estar no ar)
 #   ./dev.sh restart         reinicia os backends e o front
 #   ./dev.sh reset --yes     APAGA containers e volumes (banco e filas) e recomeça do zero
 #
@@ -386,7 +385,7 @@ cmd_up() {
   service_pid frontend >/dev/null || ensure_deps "$FRONT_DIR"
   start_infra
   step "Banco de dados"
-  "$AI_DIR/db/migrate.sh" apply
+  "$AI_DIR/db/setup.sh" apply
   step "Backends"
   # O mock primeiro: ele declara a fila de eventos, então nada publicado se perde.
   start_service ifood-backend
@@ -452,10 +451,6 @@ cmd_status() {
     else state="parado"; fi
     printf '  %-18s %-6s %s\n' "$name" ":$port" "$state"
   done
-  if detect_engine_quiet && container_running "$PG_CONTAINER"; then
-    say "Migrações:"
-    "$AI_DIR/db/migrate.sh" status | sed 's/^/  /'
-  fi
 }
 
 cmd_logs() {
@@ -468,11 +463,6 @@ cmd_logs() {
         exec tail -n 80 -f "$(log_file "$target")" ;;
     *) die "serviço desconhecido: $target (use ai-backend, ifood-backend ou frontend)" ;;
   esac
-}
-
-cmd_migrate() {
-  detect_engine
-  "$AI_DIR/db/migrate.sh" apply
 }
 
 cmd_restart() {
@@ -510,7 +500,6 @@ main() {
     down|stop) cmd_down ;;
     status) cmd_status ;;
     logs) cmd_logs "${2:-}" ;;
-    migrate) cmd_migrate ;;
     restart) cmd_restart ;;
     reset) cmd_reset "${2:-}" ;;
     help|-h|--help) usage ;;

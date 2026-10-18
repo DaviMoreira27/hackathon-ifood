@@ -98,7 +98,7 @@ export function createCtx(
       drop: () => undefined,
     } as unknown as McpService,
     {
-      getOrCreateByTelegram: async () => ({ id: USER_ID }),
+      getOrCreateByChat: async () => ({ id: USER_ID }),
     } as unknown as UsersService,
     db as unknown as MessagesService,
     new GroupOrderTools(orders as unknown as GroupOrderService),

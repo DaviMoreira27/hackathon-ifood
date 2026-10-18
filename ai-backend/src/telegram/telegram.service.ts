@@ -8,6 +8,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import TelegramBot from 'node-telegram-bot-api';
 import { AgentService } from '../agent/agent.service.js';
 import type { ReplyImage } from '../agent/images.js';
+import { ChatsService } from '../chats/chats.service.js';
 import {
   PAYMENT_APPLIED,
   USER_LOGGED_IN,
@@ -15,7 +16,8 @@ import {
 } from '../common/events.js';
 import type { PaymentApplied } from '../payments/payments.service.js';
 import { markdownToTelegramHtml } from './markdown.js';
-import { formatPaymentNotice } from './payment-notice.js';
+import { formatPaymentNotice } from '../common/payment-notice.js';
+import { splitByLines } from '../common/split-by-lines.js';
 import { appConfig } from '../config/app-config.js';
 
 // Botões do pedido de confirmação. O toque vira a mesma mensagem que a pessoa digitaria, então
@@ -40,7 +42,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: TelegramBot;
 
-  constructor(private readonly agent: AgentService) {}
+  constructor(
+    private readonly agent: AgentService,
+    private readonly chats: ChatsService,
+  ) {}
 
   onModuleInit(): void {
     const token = appConfig().telegramBotToken;
@@ -58,11 +63,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Telegram bot iniciado com long polling');
   }
 
-  // userId do agent = chat.id do Telegram, então dá para avisar o chat quando o login termina.
+  // Os eventos chegam com o chatId interno; só os chats do Telegram são deste canal.
   @OnEvent(USER_LOGGED_IN)
   async onUserLoggedIn({ chatId }: UserLoggedIn): Promise<void> {
+    const telegramChatId = await this.telegramChatIdOf(chatId);
+    if (telegramChatId === null) return;
     await this.sendMessage(
-      chatId,
+      telegramChatId,
       'Login no iFood feito ✅ Pode mandar seu pedido.',
     );
   }
@@ -71,7 +78,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   @OnEvent(PAYMENT_APPLIED)
   async onPaymentApplied(applied: PaymentApplied): Promise<void> {
     if (applied.ownerChatId === null) return;
-    await this.sendMessage(applied.ownerChatId, formatPaymentNotice(applied));
+    const telegramChatId = await this.telegramChatIdOf(applied.ownerChatId);
+    if (telegramChatId === null) return;
+    await this.sendMessage(telegramChatId, formatPaymentNotice(applied));
+  }
+
+  private async telegramChatIdOf(chatId: number): Promise<number | null> {
+    const address = await this.chats.address(chatId);
+    return address?.channel === 'telegram' ? Number(address.externalId) : null;
   }
 
   onModuleDestroy(): void {
@@ -129,7 +143,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const name =
         [from?.first_name, from?.last_name].filter(Boolean).join(' ') ||
         from?.username;
-      const reply = await this.agent.handleRich(chatId, text, { name });
+      const internalChatId = await this.chats.resolve(
+        'telegram',
+        String(chatId),
+      );
+      const reply = await this.agent.handleRich(internalChatId, text, {
+        name,
+      });
       await this.sendPhotos(chatId, reply.images);
       await this.sendMessage(chatId, reply.text, {
         confirmButtons: reply.awaitingConfirmation,
@@ -271,24 +291,3 @@ function isBadRequest(err: unknown): boolean {
 
 // Limite do Telegram é 4096 chars; deixa folga porque a conversão para HTML aumenta o texto.
 const CHUNK_SIZE = 3500;
-
-// Quebra em linhas inteiras para não cortar formatação no meio.
-function splitByLines(text: string, max: number): string[] {
-  const chunks: string[] = [];
-  let current = '';
-  for (const line of text.split('\n')) {
-    const candidate = current ? `${current}\n${line}` : line;
-    if (candidate.length <= max) {
-      current = candidate;
-      continue;
-    }
-    if (current) chunks.push(current);
-    current = line;
-    while (current.length > max) {
-      chunks.push(current.slice(0, max));
-      current = current.slice(max);
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}

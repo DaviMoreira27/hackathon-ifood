@@ -3,6 +3,7 @@ import type { Database } from '../src/db/types.js';
 import {
   cartPayers,
   carts,
+  chats,
   orders,
   participants,
   payments,
@@ -32,9 +33,10 @@ export async function createPayingOrder(
   chatId: number,
   fixtureCarts: FixtureCart[],
 ): Promise<PayingOrder> {
+  await createTestChats(db, [chatId]);
   const [user] = await db
     .insert(users)
-    .values({ name: `Teste ${chatId}`, telegramChatId: chatId })
+    .values({ name: `Teste ${chatId}`, chatId })
     .returning();
   const [order] = await db
     .insert(orders)
@@ -94,26 +96,48 @@ export async function createPayingOrder(
   return result;
 }
 
+// chats.id é bigserial, mas os testes usam ids altos escolhidos por eles: cria a linha com esse id.
+export async function createTestChats(
+  db: Database,
+  chatIds: number[],
+): Promise<void> {
+  if (chatIds.length === 0) return;
+  await db
+    .insert(chats)
+    .values(
+      chatIds.map((id) => ({
+        id,
+        channel: 'telegram' as const,
+        externalId: String(id),
+      })),
+    )
+    .onConflictDoNothing();
+}
+
 // Apaga os usuários de teste (pedidos, carrinhos, participantes e pagamentos caem em cascata
-// pelas FKs dos pedidos/carrinhos).
+// pelas FKs dos pedidos/carrinhos) e depois os chats (mensagens, logins e traces em cascata).
 export async function deleteTestUsers(
   db: Database,
   chatIds: number[],
 ): Promise<void> {
+  if (chatIds.length === 0) return;
   const found = await db
     .select({ id: users.id })
     .from(users)
-    .where(inArray(users.telegramChatId, chatIds));
+    .where(inArray(users.chatId, chatIds));
   const ids = found.map((u) => u.id);
-  if (ids.length === 0) return;
-  await db.delete(orders).where(inArray(orders.ownerUserId, ids));
-  await db.delete(users).where(inArray(users.id, ids));
+  if (ids.length) {
+    await db.delete(orders).where(inArray(orders.ownerUserId, ids));
+    await db.delete(users).where(inArray(users.id, ids));
+  }
+  await db.delete(chats).where(inArray(chats.id, chatIds));
 }
 
 export async function createUser(db: Database, chatId: number) {
+  await createTestChats(db, [chatId]);
   const [user] = await db
     .insert(users)
-    .values({ name: `Teste ${chatId}`, telegramChatId: chatId })
+    .values({ name: `Teste ${chatId}`, chatId })
     .returning();
   return user;
 }

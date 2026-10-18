@@ -25,6 +25,13 @@ INSERT INTO carts (order_id, ifood_cart_id, subtotal, total, status) VALUES
   (5, 'cart_ifood_5002', 18.90, 23.90, 'paid'),
   (6, 'cart_ifood_6001', 36.00, 41.00, 'pending');
 
+INSERT INTO chats (id, channel, external_id) VALUES
+  (1001, 'telegram', '1001'),
+  (1002, 'telegram', '1002'),
+  (1003, 'telegram', '1003'),
+  (1004, 'telegram', '1004');
+SELECT setval('chats_id_seq', (SELECT max(id) FROM chats));
+
 INSERT INTO messages (chat_id, user_id, role, content, created_at) VALUES
   (1001, 1, 'user',      'Quero pedir pra 3 pessoas',                                   now() - interval '2 hours 10 minutes'),
   (1001, 1, 'assistant', 'Claro! Quem são os participantes e o que cada um quer comer?', now() - interval '2 hours 9 minutes'),
