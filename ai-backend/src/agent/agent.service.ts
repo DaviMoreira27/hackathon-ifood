@@ -36,7 +36,9 @@ import { wrapToolResult } from './tool-policy.js';
 export const ANTHROPIC_CLIENT = Symbol('ANTHROPIC_CLIENT');
 
 const MODEL = 'claude-haiku-5-5';
-const MAX_TOKENS = 4096;
+// O Haiku 5.5 pensa (adaptive thinking) por padrão, e o raciocínio conta neste limite: com 4096
+// uma resposta longa podia parar em max_tokens antes do texto.
+const MAX_TOKENS = 16000;
 // Comparar preços pede algumas buscas a mais; leituras pedidas juntas rodam em paralelo.
 const MAX_TOOL_ROUNDS = 12;
 // Quantas linhas da tabela messages entram no contexto do LLM.

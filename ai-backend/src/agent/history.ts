@@ -29,9 +29,17 @@ export function rowsToMessages(
     if (row.role === 'user') {
       out.push({ role: 'user', content: row.content });
     } else if (row.role === 'assistant') {
+      // Blocos de raciocínio (thinking) de turnos anteriores não voltam ao modelo. A assinatura de
+      // cada bloco amarra a conversa exata em que ele nasceu, e o histórico remontado do banco
+      // muda entre mensagens (a janela desliza, resultados antigos são encurtados, a lista de
+      // ferramentas muda): reenviá-los dá 400 em contas com a checagem ativa. Dentro do turno
+      // atual o array só cresce, então os blocos novos continuam válidos.
+      const blocks = (row.payload as ContentBlockParam[] | null)?.filter(
+        (b) => b.type !== 'thinking' && b.type !== 'redacted_thinking',
+      );
       out.push({
         role: 'assistant',
-        content: (row.payload as ContentBlockParam[] | null) ?? row.content,
+        content: blocks?.length ? blocks : row.content,
       });
     } else if (row.payload != null) {
       out.push({

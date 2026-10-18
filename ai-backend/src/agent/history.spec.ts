@@ -83,6 +83,29 @@ describe('rowsToMessages — reparo de tool_use órfão', () => {
   });
 });
 
+describe('rowsToMessages — thinking', () => {
+  it('não reenvia blocos de raciocínio de turnos anteriores', () => {
+    const payload = [
+      { type: 'thinking', thinking: '', signature: 'sig' },
+      { type: 'redacted_thinking', data: 'x' },
+      { type: 'tool_use', id: 'a', name: 'searchOffers', input: {} },
+    ];
+
+    const messages = rowsToMessages([
+      row(1, 'user', 'pizza'),
+      row(2, 'assistant', '[ferramentas: searchOffers]', payload),
+      row(3, 'tool', 'r', [
+        { type: 'tool_result', tool_use_id: 'a', content: 'r' },
+      ]),
+    ]);
+
+    expect(messages[1]).toEqual({
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'a', name: 'searchOffers', input: {} }],
+    });
+  });
+});
+
 describe('messagesToRows', () => {
   it('guarda texto legível em content e os blocos em payload', () => {
     const toolUse = [
