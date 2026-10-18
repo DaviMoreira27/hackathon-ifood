@@ -206,3 +206,32 @@ export const dietaryRestrictions = pgTable(
   },
   (t) => [uniqueIndex().on(t.userId, t.personKey, t.kind)],
 );
+
+export interface TraceTool {
+  name: string;
+  ok: boolean;
+  ms: number;
+}
+
+export const agentTurns = pgTable('agent_turns', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  chatId: bigint('chat_id', { mode: 'number' }).notNull(),
+  userId: bigint('user_id', { mode: 'number' }).references(() => users.id, {
+    onDelete: 'set null',
+  }),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+  durationMs: integer('duration_ms').notNull(),
+  rounds: integer('rounds').notNull(),
+  // reply | tool_limit | refusal | error
+  outcome: text('outcome').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+  cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+  tools: jsonb('tools').$type<TraceTool[]>().notNull().default([]),
+  validatorHits: jsonb('validator_hits')
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  error: text('error'),
+});

@@ -1,5 +1,7 @@
 import { eq, inArray } from 'drizzle-orm';
 import type Anthropic from '@anthropic-ai/sdk';
+import { TurnTracesService } from '../agent/turn-traces.service.js';
+import { DEFAULT_AGENT_CONFIG } from '../agent/agent.config.js';
 import { AgentService } from '../agent/agent.service.js';
 import { wrapToolResult } from '../agent/tool-policy.js';
 import type { AuthService } from '../auth/auth.service.js';
@@ -215,6 +217,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
         ),
       ),
       new DietaryTools(new DietaryService(database)),
+      new TurnTracesService(database),
+      DEFAULT_AGENT_CONFIG,
     );
 
     expect(await agent.handle(chat, 'procura x', { name: 'Maria' })).toBe(

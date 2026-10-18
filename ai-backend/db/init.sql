@@ -116,6 +116,25 @@ CREATE TABLE dietary_restrictions (
   UNIQUE (user_id, person_key, kind)
 );
 
+-- Trace de cada turno do agente (ferramentas, tokens, latência, validadores, onde parou).
+CREATE TABLE agent_turns (
+  id                 BIGSERIAL PRIMARY KEY,
+  chat_id            BIGINT NOT NULL,
+  user_id            BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  started_at         TIMESTAMPTZ NOT NULL,
+  duration_ms        INTEGER NOT NULL,
+  rounds             INTEGER NOT NULL,
+  outcome            TEXT NOT NULL,
+  input_tokens       INTEGER NOT NULL DEFAULT 0,
+  output_tokens      INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  tools              JSONB NOT NULL DEFAULT '[]',
+  validator_hits     JSONB NOT NULL DEFAULT '[]',
+  error              TEXT
+);
+CREATE INDEX idx_agent_turns_chat ON agent_turns (chat_id, started_at);
+
 CREATE UNIQUE INDEX uq_carts_order_ifood ON carts(order_id, ifood_cart_id);
 -- Cobranças anuladas (void) não contam: a pessoa pode ganhar uma nova ao reabrir o pedido.
 CREATE UNIQUE INDEX uq_payments_participant_active ON payments(participant_id) WHERE status <> 'void';

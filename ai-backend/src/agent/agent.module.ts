@@ -7,6 +7,12 @@ import { McpModule } from '../mcp/mcp.module.js';
 import { MessagesModule } from '../messages/messages.module.js';
 import { UsersModule } from '../users/users.module.js';
 import { AgentService, ANTHROPIC_CLIENT } from './agent.service.js';
+import { TurnTracesService } from './turn-traces.service.js';
+import {
+  AGENT_CONFIG,
+  loadAgentConfig,
+  type AgentConfig,
+} from './agent.config.js';
 
 @Module({
   imports: [
@@ -19,10 +25,13 @@ import { AgentService, ANTHROPIC_CLIENT } from './agent.service.js';
   ],
   providers: [
     AgentService,
+    TurnTracesService,
+    { provide: AGENT_CONFIG, useFactory: () => loadAgentConfig() },
     {
       provide: ANTHROPIC_CLIENT,
-      useFactory: () =>
-        new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }),
+      inject: [AGENT_CONFIG],
+      useFactory: (config: AgentConfig) =>
+        new Anthropic({ apiKey: config.apiKey }),
     },
   ],
   exports: [AgentService],

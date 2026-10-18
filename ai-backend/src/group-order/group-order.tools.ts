@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Tool } from '@anthropic-ai/sdk/resources/messages.js';
 import { GroupOrderError } from './group-order.errors.js';
-import { GroupOrderService } from './group-order.service.js';
+import {
+  GroupOrderService,
+  type OrderView,
+  type SyncCartInput,
+  type SyncCartResult,
+} from './group-order.service.js';
 
 export interface ToolContext {
   chatId: number;
@@ -42,8 +47,9 @@ export const GROUP_TOOLS: Tool[] = [
     description:
       'Mostra o estado atual do pedido em grupo: participantes, carrinhos, itens e quem paga cada um, ' +
       'a prévia de quanto cada pessoa paga (já com a divisão das taxas), o status dos pagamentos e ' +
-      'problemas a resolver. Use sempre que não tiver certeza do estado, antes de montar o resumo ' +
-      'para o usuário e depois de avisos de pagamento. Os valores em R$ já vêm calculados: não refaça contas.',
+      'problemas a resolver. Um resumo do estado já chega em cada mensagem (estado_do_pedido); use esta ' +
+      'ferramenta para os detalhes completos antes de montar o resumo de confirmação e depois de avisos de ' +
+      'pagamento. Os valores em R$ já vêm calculados: não refaça contas.',
     input_schema: schema({}),
   },
   {
@@ -59,8 +65,9 @@ export const GROUP_TOOLS: Tool[] = [
   {
     name: 'group_sync_cart',
     description:
-      'Registra no pedido em grupo um carrinho que existe no iFood. Chame DEPOIS de createCart, ' +
-      'addItemToCart, updateCartItem ou removeItemFromCart, com o carrinho lido por getCart: a lista inteira de itens ' +
+      'RESERVA: o sistema já sincroniza o carrinho sozinho depois de cada alteração. Use somente quando o ' +
+      'resultado de uma alteração disser que a sincronização automática falhou. Registra no pedido em grupo ' +
+      'um carrinho que existe no iFood, com o carrinho lido por getCart: a lista inteira de itens ' +
       '(os que faltarem na lista são removidos do registro) e subtotal e total exatamente como o iFood ' +
       'informa. unit_price é o preço unitário FINAL do item (com opcionais), de modo que a soma de ' +
       'unit_price x quantity de todos os itens seja igual ao subtotal. O pagador já definido de um item ' +
@@ -154,8 +161,8 @@ export const GROUP_TOOLS: Tool[] = [
   {
     name: 'group_mark_finalized',
     description:
-      'Marca o pedido totalmente pago como finalizado. Chame somente depois de submitOrder ter dado certo ' +
-      'dos carrinhos no iFood com sucesso.',
+      'Marca o pedido totalmente pago como finalizado. Chame somente depois de o submitOrder ter dado certo ' +
+      'para todos os carrinhos do pedido no iFood.',
     input_schema: schema({
       order_id: {
         type: 'integer',
@@ -290,6 +297,18 @@ export class GroupOrderTools {
         error: 'Erro interno ao preparar a confirmação. Tente novamente.',
       };
     }
+  }
+
+  // Sync automático (ver agent/cart-sync.ts): os números vêm do getCart, não do LLM.
+  syncIfoodCart(
+    ctx: ToolContext,
+    input: SyncCartInput,
+  ): Promise<SyncCartResult> {
+    return this.orders.syncCart(ctx.userId, input);
+  }
+
+  orderView(ctx: ToolContext): Promise<OrderView> {
+    return this.orders.getOrderView(ctx.userId);
   }
 
   checkoutAllowed(userId: number): Promise<boolean> {
