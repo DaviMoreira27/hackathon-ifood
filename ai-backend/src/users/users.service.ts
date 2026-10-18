@@ -104,8 +104,12 @@ export class UsersService implements OnModuleInit {
     return (await this.findByChatId(chatId))!;
   }
 
-  async getIfoodTokens(chatId: number): Promise<IfoodTokens | null> {
-    const user = await this.findByChatId(chatId);
+  // `loaded`: o usuário já lido pelo chamador (evita outra consulta).
+  async getIfoodTokens(
+    chatId: number,
+    loaded?: User,
+  ): Promise<IfoodTokens | null> {
+    const user = loaded ?? (await this.findByChatId(chatId));
     if (!user?.ifoodToken || !user.ifoodRefreshToken || !user.tokenExpiresAt) {
       return null;
     }

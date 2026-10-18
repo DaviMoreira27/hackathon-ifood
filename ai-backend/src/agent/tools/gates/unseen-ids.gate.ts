@@ -1,5 +1,5 @@
 import type { Logger } from '@nestjs/common';
-import { factCorpus, unseenIds } from '../../reply-check.js';
+import { unseenIds } from '../../reply-check.js';
 import type { TurnContext } from '../../turn/turn-context.js';
 import type { ToolCall, ToolHandler } from '../tool-handler.js';
 import type { ToolRegistry } from '../tool-registry.js';
@@ -24,10 +24,7 @@ export class UnseenIdsGate implements ToolGate {
     if (this.registry.isReadOnly(call.name, ctx)) {
       return Promise.resolve({ kind: 'run' });
     }
-    const unseen = unseenIds(
-      call.input,
-      factCorpus(ctx.messages, [ctx.stateBlock]),
-    );
+    const unseen = unseenIds(call.input, ctx.facts.text);
     if (unseen.length === 0) return Promise.resolve({ kind: 'run' });
     const list = unseen.map((u) => `${u.key}=${u.value}`).join(', ');
     this.logger.warn(

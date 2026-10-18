@@ -8,6 +8,7 @@ import { appConfig } from '../config/app-config.js';
 export class DbService implements OnModuleDestroy {
   private readonly pool = new pg.Pool({
     connectionString: appConfig().databaseUrl,
+    max: appConfig().databasePoolSize,
   });
   readonly db: NodePgDatabase<typeof schema> = drizzle(this.pool, { schema });
 

@@ -3,6 +3,7 @@ import type { TraceTool } from '../../db/schema.js';
 import type { OrderView } from '../../group-order/group-order.service.js';
 import type { ToolContext } from '../../group-order/group-order.tools.js';
 import type { McpSession } from '../../mcp/mcp.service.js';
+import { FactCorpus, factTexts } from '../reply-check.js';
 
 export const CONFIRM_TTL_MS = 5 * 60 * 1000;
 
@@ -24,6 +25,8 @@ export class TurnContext {
   readonly ownerName?: string;
   // O que as ferramentas locais recebem (sem o resto do estado do turno).
   readonly tool: ToolContext;
+  // Tudo o que veio de ferramentas, do usuário ou do sistema: fonte dos ids e valores aceitos.
+  readonly facts = new FactCorpus();
 
   private mcpSession?: McpSession;
   // Conversa viva (histórico + turno) e o estado do pedido injetado: base dos validadores.
@@ -39,6 +42,8 @@ export class TurnContext {
   private readonly ok: string[] = [];
   private readonly tools: TraceTool[] = [];
   private readonly hits: string[] = [];
+  // Lido uma vez por turno; group_* e o sync do carrinho invalidam.
+  private view?: Promise<OrderView>;
 
   constructor(
     user: { chatId: number; userId: number; ownerName?: string },
@@ -54,6 +59,7 @@ export class TurnContext {
   begin(session: McpSession, messages: MessageParam[]): void {
     this.mcpSession = session;
     this.conversation = messages;
+    this.facts.add(...factTexts(messages));
   }
 
   get session(): McpSession {
@@ -71,10 +77,24 @@ export class TurnContext {
 
   setStateBlock(block: string): void {
     this.state = block;
+    this.facts.add(block);
   }
 
   orderView(): Promise<OrderView> {
-    return this.loadOrderView(this.tool);
+    if (!this.view) {
+      const loading = this.loadOrderView(this.tool);
+      this.view = loading;
+      // Falha não fica memorizada: a próxima leitura tenta de novo.
+      loading.catch(() => {
+        if (this.view === loading) this.view = undefined;
+      });
+    }
+    return this.view;
+  }
+
+  // O pedido mudou no banco: a próxima orderView() relê.
+  markOrderChanged(): void {
+    this.view = undefined;
   }
 
   get pendingAction(): PendingAction | undefined {
@@ -112,6 +132,7 @@ export class TurnContext {
   // O carrinho mudou neste turno: a resposta leva o resumo do pedido montado pelo código.
   markCartChanged(): void {
     this.cartChanged = true;
+    this.markOrderChanged();
   }
 
   get cartWasChanged(): boolean {

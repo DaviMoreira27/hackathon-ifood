@@ -26,11 +26,8 @@ export function emptyReplyNote(): string {
 // ─── corpus: tudo o que veio de ferramentas, do sistema ou do usuário ────────
 
 // Textos dos resultados de ferramentas e das mensagens do usuário na conversa (histórico + turno).
-export function factCorpus(
-  messages: MessageParam[],
-  extra: string[] = [],
-): string {
-  const parts: string[] = [...extra];
+export function factTexts(messages: MessageParam[]): string[] {
+  const parts: string[] = [];
   for (const message of messages) {
     if (message.role !== 'user') continue;
     if (typeof message.content === 'string') {
@@ -47,7 +44,40 @@ export function factCorpus(
       }
     }
   }
-  return parts.join('\n');
+  return parts;
+}
+
+export function factCorpus(
+  messages: MessageParam[],
+  extra: string[] = [],
+): string {
+  return [...extra, ...factTexts(messages)].join('\n');
+}
+
+// O mesmo corpus, mas crescendo aos poucos durante o turno: cada texto entra uma vez e os
+// valores conhecidos são extraídos só dele, sem reler a conversa inteira a cada escrita.
+export class FactCorpus {
+  private readonly parts: string[] = [];
+  private readonly cents = new Set<number>();
+  private joined: string | undefined = '';
+
+  add(...texts: string[]): void {
+    for (const text of texts) {
+      if (!text) continue;
+      this.parts.push(text);
+      for (const c of knownCents(text)) this.cents.add(c);
+      this.joined = undefined;
+    }
+  }
+
+  get text(): string {
+    this.joined ??= this.parts.join('\n');
+    return this.joined;
+  }
+
+  knownCents(): ReadonlySet<number> {
+    return this.cents;
+  }
 }
 
 // ─── valores em R$ ───────────────────────────────────────────────────────────
@@ -82,7 +112,10 @@ export interface Money {
 
 // Valores R$ da resposta que não aparecem em nenhuma ferramenta, mensagem do usuário ou texto do
 // sistema. R$ 0,00 sempre vale (entrega grátis).
-export function unknownAmounts(reply: string, known: Set<number>): Money[] {
+export function unknownAmounts(
+  reply: string,
+  known: ReadonlySet<number>,
+): Money[] {
   const out: Money[] = [];
   for (const m of reply.matchAll(BRL_IN_REPLY)) {
     const cents = brlToCents(m[1], m[2] ?? '');

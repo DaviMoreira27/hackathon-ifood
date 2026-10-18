@@ -211,21 +211,21 @@ Cada passo é um PR/commit que mantém os specs verdes.
 
 ### Fase 2 — performance em cima da estrutura nova
 
-- [ ] 2.1 Preparação do turno em paralelo: depois do token, `Promise.all` de `getSession`,
+- [x] 2.1 Preparação do turno em paralelo: depois do token, `Promise.all` de `getSession`,
       `recent`, `orderView`, `checkoutAllowed` e `dietTools.list`. Passar o `User` já carregado
       para `getValidAccessToken` (hoje ele busca o usuário de novo).
-- [ ] 2.2 Memo de `orderView` no `TurnContext`, invalidado por `markOrderChanged()`.
-- [ ] 2.3 `getOrderView` sem N+1: itens de todos os carrinhos com um `inArray`, carrinhos dos
+- [x] 2.2 Memo de `orderView` no `TurnContext`, invalidado por `markOrderChanged()`.
+- [x] 2.3 `getOrderView` sem N+1: itens de todos os carrinhos com um `inArray`, carrinhos dos
       pedidos pagos com outro.
-- [ ] 2.4 `ToolExecutor`: leituras do lote em paralelo e escritas em série, mesmo em lote misto;
+- [x] 2.4 `ToolExecutor`: leituras do lote em paralelo e escritas em série, mesmo em lote misto;
       tool_result sempre na ordem dos tool_use.
-- [ ] 2.5 Hook de cart sync agrupado por `cartId`: um `getCart` por carrinho por lote.
-- [ ] 2.6 Corpus de fatos incremental no `TurnContext` (adiciona cada tool_result ao entrar) em vez
+- [x] 2.5 Hook de cart sync agrupado por `cartId`: um `getCart` por carrinho por lote.
+- [x] 2.6 Corpus de fatos incremental no `TurnContext` (adiciona cada tool_result ao entrar) em vez
       de `factCorpus(messages)` + regex sobre a conversa inteira a cada escrita.
-- [ ] 2.7 Sessões MCP: TTL de ociosidade (fechar após ~15 min) e lista de ferramentas em cache
+- [x] 2.7 Sessões MCP: TTL de ociosidade (fechar após ~15 min) e lista de ferramentas em cache
       global com TTL (é igual para todos; evita `listTools` por chat e a cada refresh de token).
-- [ ] 2.8 Pool do Postgres dimensionado explicitamente (2.1 abre até 5 consultas por turno).
-- [ ] 2.9 Status de progresso no Telegram: mensagem editável com a etapa atual a partir dos nomes das
+- [x] 2.8 Pool do Postgres dimensionado explicitamente (2.1 abre até 5 consultas por turno).
+- [x] 2.9 Status de progresso no Telegram: mensagem editável com a etapa atual a partir dos nomes das
       ferramentas ("buscando ofertas...", "montando carrinho..."). Callback `onProgress` do
       `TurnRunner` para o `TelegramService`. Streaming do texto final não entra: ele passa pelo
       validador de valores antes de sair.

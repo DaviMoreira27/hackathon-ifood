@@ -17,6 +17,7 @@ import type { AgentConfig } from '../agent.config.js';
 import type { ConversationStore } from '../history/conversation.store.js';
 import type { ReplyImage } from '../images.js';
 import { orderStateBlock } from '../order-state.js';
+import { progressLabel } from '../progress.js';
 import { cachedMessages, cachedSystem, cachedTools } from '../prompt-cache.js';
 import { SYSTEM_PROMPT } from '../system-prompt.js';
 import type { TurnTracesService } from '../turn-traces.service.js';
@@ -47,6 +48,9 @@ export interface TurnInput {
   token: string;
   // Ação aprovada pelo /confirmar: roda antes do LLM, exatamente como o usuário viu.
   confirmed?: PendingAction;
+  // Etapa atual ("Buscando ofertas..."), a cada lote de ferramentas. Só informativo: falhas do
+  // canal não podem afetar o turno.
+  onProgress?: (label: string) => void;
 }
 
 export interface TurnResult {
@@ -153,6 +157,20 @@ export class TurnRunner {
       pending: ctx.pendingAction,
     });
 
+    let lastLabel: string | null = null;
+    const progress = (toolNames: string[]) => {
+      const label = progressLabel(toolNames);
+      if (!label || label === lastLabel || !input.onProgress) return;
+      lastLabel = label;
+      try {
+        input.onProgress(label);
+      } catch (err) {
+        this.logger.warn(
+          `[agent] falha ao avisar o progresso do chat ${chatId}: ${String(err)}`,
+        );
+      }
+    };
+
     const startedAt = new Date();
     const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     let rounds = 0;
@@ -160,19 +178,24 @@ export class TurnRunner {
     let traceError: string | null = null;
 
     try {
-      const session = await mcp.getSession(chatId, input.token);
-      // Já inclui a mensagem do usuário gravada pela fachada.
-      transcript = new TurnTranscript(await store.recent(chatId));
+      // Nada aqui depende de outra leitura: sessão do MCP, histórico, pedido e dieta saem juntos.
+      const [session, history, state, checkoutAllowed, restrictions] =
+        await Promise.all([
+          mcp.getSession(chatId, input.token),
+          // Já inclui a mensagem do usuário gravada pela fachada.
+          store.recent(chatId),
+          this.stateBlock(ctx),
+          groupTools.checkoutAllowed(userId),
+          dietTools.list(userId),
+        ]);
+      transcript = new TurnTranscript(history);
       ctx.begin(session, transcript.messages);
-      ctx.setStateBlock(await this.stateBlock(ctx));
+      ctx.setStateBlock(state);
       const tools = cachedTools(
-        this.registry.definitions(
-          ctx,
-          await groupTools.checkoutAllowed(userId),
-        ),
+        this.registry.definitions(ctx, checkoutAllowed),
       );
       // Política de restrição alimentar: só entra no prompt de quem declarou uma restrição.
-      let dietPolicy = policyFor(await dietTools.list(userId));
+      let dietPolicy = policyFor(restrictions);
       let retried = false;
 
       if (input.confirmed) {
@@ -266,6 +289,11 @@ export class TurnRunner {
         }
 
         transcript.push({ role: 'assistant', content: response.content });
+        progress(
+          response.content.flatMap((b) =>
+            b.type === 'tool_use' ? [b.name] : [],
+          ),
+        );
         transcript.push({
           role: 'user',
           content: await this.executor.run(response.content, ctx),

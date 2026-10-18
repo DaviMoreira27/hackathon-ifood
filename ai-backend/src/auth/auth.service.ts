@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes } from 'node:crypto';
 import { USER_LOGGED_IN, type UserLoggedIn } from '../common/events.js';
 import { appConfig } from '../config/app-config.js';
-import { UsersService } from '../users/users.service.js';
+import { UsersService, type User } from '../users/users.service.js';
 import { PendingLoginsService } from './pending-logins.service.js';
 
 // Servidor de autenticação do iFood. A documentação cita id.ifood.com.br (página Implementation)
@@ -95,8 +95,11 @@ export class AuthService {
     return pending.chatId;
   }
 
-  async getValidAccessToken(chatId: number): Promise<string | null> {
-    const current = await this.users.getIfoodTokens(chatId);
+  async getValidAccessToken(
+    chatId: number,
+    user?: User,
+  ): Promise<string | null> {
+    const current = await this.users.getIfoodTokens(chatId, user);
     if (!current) {
       this.logger.log(`[token] chat ${chatId} sem token — precisa logar`);
       return null;

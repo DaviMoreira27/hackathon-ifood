@@ -19,6 +19,8 @@ const bot = {
   sendChatAction: vi.fn().mockResolvedValue(true),
   answerCallbackQuery: vi.fn().mockResolvedValue(true),
   editMessageReplyMarkup: vi.fn().mockResolvedValue(true),
+  editMessageText: vi.fn().mockResolvedValue(true),
+  deleteMessage: vi.fn().mockResolvedValue(true),
   stopPolling: vi.fn(),
 };
 
@@ -113,9 +115,14 @@ describe('TelegramService (botões de confirmação)', () => {
       { inline_keyboard: [] },
       { chat_id: CHAT, message_id: 7 },
     );
-    expect(agent.handleRich).toHaveBeenCalledWith(INTERNAL, 'confirmar', {
-      name: 'Ana',
-    });
+    expect(agent.handleRich).toHaveBeenCalledWith(
+      INTERNAL,
+      'confirmar',
+      {
+        name: 'Ana',
+      },
+      { onProgress: expect.any(Function) },
+    );
   });
 
   it('tocar em Cancelar manda "cancelar" (qualquer outra mensagem cancela a ação)', async () => {
@@ -129,9 +136,14 @@ describe('TelegramService (botões de confirmação)', () => {
     });
     await flush();
 
-    expect(agent.handleRich).toHaveBeenCalledWith(INTERNAL, 'cancelar', {
-      name: undefined,
-    });
+    expect(agent.handleRich).toHaveBeenCalledWith(
+      INTERNAL,
+      'cancelar',
+      {
+        name: undefined,
+      },
+      { onProgress: expect.any(Function) },
+    );
   });
 
   it('botão desconhecido só responde ao Telegram e não fala com o agente', async () => {
@@ -154,10 +166,47 @@ describe('TelegramService (botões de confirmação)', () => {
     await flush();
 
     expect(chats.resolve).toHaveBeenCalledWith('telegram', String(CHAT));
-    expect(agent.handleRich).toHaveBeenCalledWith(INTERNAL, 'oi', {
-      name: undefined,
-    });
+    expect(agent.handleRich).toHaveBeenCalledWith(
+      INTERNAL,
+      'oi',
+      {
+        name: undefined,
+      },
+      { onProgress: expect.any(Function) },
+    );
     expect(bot.sendMessage.mock.calls.at(-1)![0]).toBe(CHAT);
+  });
+
+  it('mostra a etapa atual numa mensagem editada e a apaga antes da resposta', async () => {
+    bot.sendMessage.mockResolvedValueOnce({ message_id: 55 });
+    agent.handleRich.mockImplementation(
+      async (
+        _chat: number,
+        _text: string,
+        _profile: unknown,
+        options: { onProgress: (label: string) => void },
+      ) => {
+        options.onProgress('Buscando ofertas...');
+        options.onProgress('Montando o carrinho...');
+        return { text: 'Pronto', images: [] };
+      },
+    );
+
+    bot.handlers.get('message')!({ chat: { id: CHAT }, text: 'pizza' });
+    await flush();
+
+    expect(bot.sendMessage.mock.calls[0]).toEqual([
+      CHAT,
+      '⏳ Buscando ofertas...',
+    ]);
+    expect(bot.editMessageText).toHaveBeenCalledWith(
+      '⏳ Montando o carrinho...',
+      { chat_id: CHAT, message_id: 55 },
+    );
+    expect(bot.deleteMessage).toHaveBeenCalledWith(CHAT, 55);
+    expect(bot.deleteMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      bot.sendMessage.mock.invocationCallOrder.at(-1)!,
+    );
   });
 
   it('avisos de login e pagamento só saem para chats do Telegram', async () => {

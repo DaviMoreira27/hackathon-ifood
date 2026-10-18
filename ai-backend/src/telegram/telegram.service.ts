@@ -136,6 +136,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const typing = () =>
       void this.bot.sendChatAction(chatId, 'typing').catch(() => undefined);
     const typingTimer = setInterval(typing, TYPING_INTERVAL_MS);
+    const status = this.statusMessage(chatId);
     try {
       await this.withRetry('sendChatAction', () =>
         this.bot.sendChatAction(chatId, 'typing'),
@@ -147,9 +148,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         'telegram',
         String(chatId),
       );
-      const reply = await this.agent.handleRich(internalChatId, text, {
-        name,
-      });
+      const reply = await this.agent.handleRich(
+        internalChatId,
+        text,
+        { name },
+        { onProgress: (label) => status.show(label) },
+      );
+      await status.clear();
       await this.sendPhotos(chatId, reply.images);
       await this.sendMessage(chatId, reply.text, {
         confirmButtons: reply.awaitingConfirmation,
@@ -165,7 +170,41 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       ).catch(() => undefined);
     } finally {
       clearInterval(typingTimer);
+      await status.clear();
     }
+  }
+
+  // Uma mensagem com a etapa atual ("⏳ Buscando ofertas..."), editada a cada etapa e apagada
+  // antes da resposta. Cosmética como o "digitando...": falhas só somem. As chamadas entram numa
+  // fila para a edição nunca correr na frente do envio.
+  private statusMessage(chatId: number) {
+    let messageId: number | undefined;
+    let chain: Promise<unknown> = Promise.resolve();
+    const enqueue = (step: () => Promise<unknown>) => {
+      chain = chain.then(step).catch(() => undefined);
+      return chain;
+    };
+    return {
+      show: (label: string) =>
+        void enqueue(async () => {
+          const text = `⏳ ${label}`;
+          if (messageId === undefined) {
+            messageId = (await this.bot.sendMessage(chatId, text)).message_id;
+          } else {
+            await this.bot.editMessageText(text, {
+              chat_id: chatId,
+              message_id: messageId,
+            });
+          }
+        }),
+      clear: () =>
+        enqueue(async () => {
+          if (messageId === undefined) return;
+          const id = messageId;
+          messageId = undefined;
+          await this.bot.deleteMessage(chatId, id);
+        }),
+    };
   }
 
   async sendMessage(

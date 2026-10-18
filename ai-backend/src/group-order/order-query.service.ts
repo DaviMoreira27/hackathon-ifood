@@ -42,41 +42,56 @@ export class OrderQueryService {
   }
 
   async getOrderView(userId: number): Promise<OrderView> {
-    const [active] = await this.db
-      .select()
-      .from(orders)
-      .where(
-        and(
-          eq(orders.ownerUserId, userId),
-          inArray(orders.status, ['collecting', 'paying']),
-        ),
-      )
-      .orderBy(desc(orders.id))
-      .limit(1);
-
     // Só o último pedido pago: pedidos antigos não voltam à conversa (um pedido novo descarta os
     // anteriores; ver requireCollecting).
-    const paidOrders = await this.db
-      .select()
-      .from(orders)
-      .where(and(eq(orders.ownerUserId, userId), eq(orders.status, 'paid')))
-      .orderBy(desc(orders.id))
-      .limit(1);
-    const awaitingFinalization = await Promise.all(
-      paidOrders.map(async (o) => ({
-        order_id: o.id,
-        carts: (
-          await this.db
+    const [[active], paidOrders] = await Promise.all([
+      this.db
+        .select()
+        .from(orders)
+        .where(
+          and(
+            eq(orders.ownerUserId, userId),
+            inArray(orders.status, ['collecting', 'paying']),
+          ),
+        )
+        .orderBy(desc(orders.id))
+        .limit(1),
+      this.db
+        .select()
+        .from(orders)
+        .where(and(eq(orders.ownerUserId, userId), eq(orders.status, 'paid')))
+        .orderBy(desc(orders.id))
+        .limit(1),
+    ]);
+    const orderIds = [active?.id, ...paidOrders.map((o) => o.id)].filter(
+      (id): id is number => id !== undefined,
+    );
+    const [allCarts, people, paymentRows] = await Promise.all([
+      orderIds.length
+        ? this.db
             .select()
             .from(carts)
-            .where(eq(carts.orderId, o.id))
+            .where(inArray(carts.orderId, orderIds))
             .orderBy(asc(carts.id))
-        ).map((c) => ({
+        : Promise.resolve([]),
+      active
+        ? this.db
+            .select()
+            .from(participants)
+            .where(eq(participants.orderId, active.id))
+            .orderBy(asc(participants.id))
+        : Promise.resolve([]),
+      active ? loadPayments(this.db, active.id) : Promise.resolve([]),
+    ]);
+    const awaitingFinalization = paidOrders.map((o) => ({
+      order_id: o.id,
+      carts: allCarts
+        .filter((c) => c.orderId === o.id)
+        .map((c) => ({
           ifood_cart_id: c.ifoodCartId,
           restaurant: cartLabel(c),
         })),
-      })),
-    );
+    }));
 
     if (!active) {
       return {
@@ -86,27 +101,26 @@ export class OrderQueryService {
       };
     }
 
-    const people = await this.db
-      .select()
-      .from(participants)
-      .where(eq(participants.orderId, active.id))
-      .orderBy(asc(participants.id));
     const nameById = new Map(people.map((p) => [p.id, p.name]));
-    const cartRows = await this.db
-      .select()
-      .from(carts)
-      .where(eq(carts.orderId, active.id))
-      .orderBy(asc(carts.id));
+    const cartRows = allCarts.filter((c) => c.orderId === active.id);
+    const itemRows = cartRows.length
+      ? await this.db
+          .select()
+          .from(cartItems)
+          .where(
+            inArray(
+              cartItems.cartId,
+              cartRows.map((c) => c.id),
+            ),
+          )
+          .orderBy(asc(cartItems.id))
+      : [];
     const problems: string[] = [];
     const preview: Array<Record<string, string>> = [];
 
     const cartViews = [];
     for (const cart of cartRows) {
-      const items = await this.db
-        .select()
-        .from(cartItems)
-        .where(eq(cartItems.cartId, cart.id))
-        .orderBy(asc(cartItems.id));
+      const items = itemRows.filter((i) => i.cartId === cart.id);
       const payerNames = [
         ...new Set(
           items
@@ -162,7 +176,6 @@ export class OrderQueryService {
       }
     }
 
-    const paymentRows = await loadPayments(this.db, active.id);
     const now = Date.now();
     const paymentViews = paymentRows
       .filter((p) => p.status !== 'void')

@@ -31,6 +31,11 @@ export interface ChatProfile {
   name?: string;
 }
 
+export interface TurnOptions {
+  // Etapa atual do turno ("Buscando ofertas..."), para o canal mostrar enquanto espera.
+  onProgress?: (label: string) => void;
+}
+
 export interface AgentReply {
   text: string;
   // Fotos de pratos/lojas escolhidas pelo LLM e validadas pelo código (ver images.ts).
@@ -86,9 +91,10 @@ export class AgentService {
     chatId: number,
     text: string,
     profile?: ChatProfile,
+    options: TurnOptions = {},
   ): Promise<AgentReply> {
     const queued = this.queue.enqueue(chatId, async () => {
-      const reply = await this.process(chatId, text, profile);
+      const reply = await this.process(chatId, text, profile, options);
       // Dentro da fila do chat: nenhuma outra mensagem dele consumiu a ação pendente ainda.
       return {
         ...reply,
@@ -105,7 +111,8 @@ export class AgentService {
   private async process(
     chatId: number,
     text: string,
-    profile?: ChatProfile,
+    profile: ChatProfile | undefined,
+    options: TurnOptions,
   ): Promise<AgentReply> {
     this.logger.log(
       `[agent] mensagem do chat ${chatId} (${text.length} chars)`,
@@ -136,9 +143,10 @@ export class AgentService {
     }
 
     const user = await this.users.getOrCreateByChat(chatId, profile?.name);
-    await this.store.addText(chatId, user.id, 'user', text);
-
-    const token = await this.auth.getValidAccessToken(chatId);
+    const [, token] = await Promise.all([
+      this.store.addText(chatId, user.id, 'user', text),
+      this.auth.getValidAccessToken(chatId, user),
+    ]);
     if (!token) {
       this.logger.log(`[agent] chat ${chatId} sem login — enviando link`);
       return reply(await this.loginReply(chatId, user.id));
@@ -151,6 +159,7 @@ export class AgentService {
         ownerName: profile?.name,
         token,
         confirmed,
+        onProgress: options.onProgress,
       });
       if (result.pending) this.pendingActions.set(chatId, result.pending);
       return { text: result.text, images: result.images };

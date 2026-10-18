@@ -5,7 +5,6 @@ import { orderSummary } from '../order-state.js';
 import {
   correctionNote,
   emptyReplyNote,
-  factCorpus,
   knownCents,
   stripAmounts,
   unbackedClaims,
@@ -66,12 +65,13 @@ export class ReplyFinalizer {
 
     // Validador da resposta final: todo R$ precisa ter vindo de uma ferramenta, do sistema
     // ou do usuário, e toda ação afirmada precisa ter dado certo neste turno.
-    const amounts = unknownAmounts(
-      text,
-      knownCents(
-        factCorpus(transcript.messages, [ctx.stateBlock, ...ctx.appendices]),
-      ),
-    );
+    const known = ctx.appendices.length
+      ? new Set([
+          ...ctx.facts.knownCents(),
+          ...knownCents(ctx.appendices.join('\n')),
+        ])
+      : ctx.facts.knownCents();
+    const amounts = unknownAmounts(text, known);
     const claims = unbackedClaims(text, [...ctx.succeeded]);
     if (amounts.length || claims.length) {
       const hits = [

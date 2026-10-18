@@ -36,6 +36,7 @@ export class GroupSource implements ToolSource {
             call.input,
             ctx.tool,
           );
+          ctx.markOrderChanged();
           if (local.appendix) ctx.addAppendix(local.appendix);
           if (!local.isError && CART_TOOLS.has(call.name)) {
             ctx.markCartChanged();

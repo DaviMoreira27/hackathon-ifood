@@ -40,6 +40,9 @@ const DEFAULT_IFOOD_SCOPES = [
 export interface AppConfig {
   port: number;
   databaseUrl: string;
+  // Conexões simultâneas com o Postgres. Um turno abre até 5 consultas em paralelo na preparação
+  // e o estado do pedido mais 3: com o padrão de 10 do driver, dois chats juntos já fazem fila.
+  databasePoolSize: number;
   // Canais de chat: cada um só sobe quando configurado.
   telegramBotToken?: string;
   whatsapp?: {
@@ -176,6 +179,7 @@ export function loadAppConfig(
   const config: AppConfig = {
     port: int('PORT', 3000, 1, 65535),
     databaseUrl: read(env, 'DATABASE_URL') ?? DEFAULT_DATABASE_URL,
+    databasePoolSize: int('DATABASE_POOL_SIZE', 20, 1, 200),
     telegramBotToken: read(env, 'TELEGRAM_BOT_TOKEN'),
     whatsapp,
     internalApiKey: read(env, 'INTERNAL_API_KEY'),

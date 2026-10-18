@@ -664,6 +664,59 @@ describe('AgentService', () => {
       expect(byName.get('search_offers')?.strict).toBeUndefined();
     });
 
+    it('lote misto: leituras seguidas em paralelo, escritas em série, resultados na ordem', async () => {
+      (session as { readOnlyTools?: Set<string> }).readOnlyTools = new Set([
+        'getItem',
+      ]);
+      session.tools.push({ name: 'getItem' }, { name: 'addItemToCart' });
+      await seedToolResult(db, CHAT, '{"cartId":"c1","itemId":"i1"}');
+      const use = (id: string, name: string) => ({
+        type: 'tool_use',
+        id,
+        name,
+        input: name === 'addItemToCart' ? { cartId: 'c1', itemId: 'i1' } : {},
+      });
+      create
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [
+            use('r1', 'getItem'),
+            use('r2', 'getItem'),
+            use('w1', 'addItemToCart'),
+            use('r3', 'getItem'),
+          ],
+        })
+        .mockResolvedValueOnce(textReply('pronto'));
+      const log: string[] = [];
+      let inFlight = 0;
+      let maxInFlight = 0;
+      mcp.callTool.mockImplementation(
+        async (_s: unknown, name: string, input: unknown) => {
+          if (name === 'getCart') return { text: '{}', isError: false };
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          log.push(`start:${name}`);
+          await new Promise((r) => setTimeout(r, 5));
+          log.push(`end:${name}`);
+          inFlight--;
+          return { text: JSON.stringify({ name, input }), isError: false };
+        },
+      );
+
+      await agent.handle(CHAT, 'vai');
+
+      expect(maxInFlight).toBe(2);
+      expect(log.slice(0, 2)).toEqual(['start:getItem', 'start:getItem']);
+      expect(log.indexOf('start:addItemToCart')).toBeGreaterThan(
+        log.lastIndexOf('end:getItem', 3),
+      );
+      expect(log.at(-2)).toBe('start:getItem');
+      const ids = sent[1]
+        .at(-1)!
+        .content.map((b: { tool_use_id: string }) => b.tool_use_id);
+      expect(ids).toEqual(['r1', 'r2', 'w1', 'r3']);
+    });
+
     it('recusa do modelo vira mensagem própria, sem executar nada', async () => {
       create.mockResolvedValue({
         stop_reason: 'refusal',
@@ -774,6 +827,48 @@ describe('AgentService', () => {
         expect(reply).toBe(
           'Adicionei a pizza.\n\n🧾 **Seu pedido**\n**Pizzaria** — total R$ 47,90\n• 1x Pizza G — R$ 40,00',
         );
+      });
+
+      it('várias escritas no mesmo carrinho num lote leem o carrinho uma vez só', async () => {
+        create.mockReset();
+        create
+          .mockResolvedValueOnce({
+            stop_reason: 'tool_use',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'a1',
+                name: 'addItemToCart',
+                input: { cartId: 'c1', itemId: 'i1' },
+              },
+              {
+                type: 'tool_use',
+                id: 'a2',
+                name: 'addItemToCart',
+                input: { cartId: 'c1', itemId: 'i1' },
+              },
+            ],
+          })
+          .mockResolvedValueOnce(textReply('Adicionei as pizzas.'));
+        mcp.callTool.mockImplementation(async (_s: unknown, name: string) =>
+          name === 'getCart'
+            ? { text: CART, isError: false }
+            : { text: '{"ok":true}', isError: false },
+        );
+        groupTools.syncIfoodCart.mockResolvedValue({ ifood_cart_id: 'c1' });
+
+        await agent.handle(CHAT, 'adiciona duas pizzas');
+
+        const getCarts = mcp.callTool.mock.calls.filter(
+          (c) => c[1] === 'getCart',
+        );
+        expect(getCarts).toHaveLength(1);
+        expect(groupTools.syncIfoodCart).toHaveBeenCalledTimes(1);
+        const [first, second] = sent[1].at(-1)!.content;
+        expect(first.tool_use_id).toBe('a1');
+        expect(first.content).toContain('ao final deste lote');
+        expect(second.tool_use_id).toBe('a2');
+        expect(second.content).toContain('sincronizado automaticamente');
       });
 
       it('se não reconhece o getCart, manda o LLM usar group_sync_cart', async () => {
