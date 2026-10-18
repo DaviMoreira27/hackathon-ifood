@@ -14,6 +14,10 @@ import {
   type AgentConfig,
 } from './agent.config.js';
 
+// Uma chamada presa não pode segurar a fila do chat: o SDK desiste após 60s e repete até 2 vezes.
+const ANTHROPIC_TIMEOUT_MS = 60_000;
+const ANTHROPIC_MAX_RETRIES = 2;
+
 @Module({
   imports: [
     AuthModule,
@@ -31,7 +35,11 @@ import {
       provide: ANTHROPIC_CLIENT,
       inject: [AGENT_CONFIG],
       useFactory: (config: AgentConfig) =>
-        new Anthropic({ apiKey: config.apiKey }),
+        new Anthropic({
+          apiKey: config.apiKey,
+          timeout: ANTHROPIC_TIMEOUT_MS,
+          maxRetries: ANTHROPIC_MAX_RETRIES,
+        }),
     },
   ],
   exports: [AgentService],

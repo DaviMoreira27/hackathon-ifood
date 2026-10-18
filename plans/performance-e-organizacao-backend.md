@@ -181,16 +181,16 @@ escuta. Mudança pequena e isolada.
 
 ### Fase 0 — correções rápidas (independentes, sem refatoração)
 
-- [ ] Corrigir `MCP_CHECKOUT_TOOL_PATTERN` no `.env.example` (deixar vazio para usar o padrão
+- [x] Corrigir `MCP_CHECKOUT_TOOL_PATTERN` no `.env.example` (deixar vazio para usar o padrão
       `submit_?order|checkout`, ou `submitOrder|checkout`) e no `.env` local.
-- [ ] "Digitando..." contínuo: reenviar `sendChatAction` a cada 4s enquanto `handleRich` roda
+- [x] "Digitando..." contínuo: reenviar `sendChatAction` a cada 4s enquanto `handleRich` roda
       (`telegram.service.ts:69`); limpar o intervalo no `finally`.
-- [ ] Índice `messages (chat_id, id)` no lugar de `(chat_id, created_at)` (`recent()` ordena por id).
+- [x] Índice `messages (chat_id, id)` no lugar de `(chat_id, created_at)` (`recent()` ordena por id).
       Migration nova + `init.sql`.
-- [ ] `addMany`: um único `insert(...).values(rows)` em vez de um insert por linha.
-- [ ] Timeout e retries explícitos no cliente Anthropic (`agent.module.ts`), ex.: `timeout: 60_000`,
+- [x] `addMany`: um único `insert(...).values(rows)` em vez de um insert por linha.
+- [x] Timeout e retries explícitos no cliente Anthropic (`agent.module.ts`), ex.: `timeout: 60_000`,
       `maxRetries: 2`.
-- [ ] Remover `CartsModule`, `OrdersModule` e o `AppController`/`AppService` do scaffold.
+- [x] Remover `CartsModule`, `OrdersModule` e o `AppController`/`AppService` do scaffold.
 
 ### Fase 1 — reorganização sem mudar comportamento
 

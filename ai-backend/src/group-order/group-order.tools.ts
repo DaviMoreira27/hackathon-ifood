@@ -319,7 +319,7 @@ export class GroupOrderTools {
     let pattern: RegExp;
     try {
       pattern = new RegExp(
-        process.env.MCP_CHECKOUT_TOOL_PATTERN ?? 'submit_?order|checkout',
+        process.env.MCP_CHECKOUT_TOOL_PATTERN || 'submit_?order|checkout',
         'i',
       );
     } catch {

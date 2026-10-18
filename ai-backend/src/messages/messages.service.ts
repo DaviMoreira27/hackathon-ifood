@@ -18,12 +18,10 @@ export class MessagesService {
     await this.db.insert(messages).values(message);
   }
 
-  // Tudo ou nada, na ordem recebida: uma conversa nunca fica com tool_use sem tool_result.
+  // Um único INSERT (tudo ou nada), na ordem recebida: uma conversa nunca fica com tool_use sem tool_result.
   async addMany(rows: NewMessage[]): Promise<void> {
     if (rows.length === 0) return;
-    await this.db.transaction(async (tx) => {
-      for (const row of rows) await tx.insert(messages).values(row);
-    });
+    await this.db.insert(messages).values(rows);
   }
 
   // As últimas `limit` mensagens do chat, da mais antiga para a mais nova.

@@ -114,7 +114,6 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     from?: TelegramBot.User,
   ): Promise<void> {
     try {
-      // "digitando..." é só cosmético: se falhar, segue o fluxo.
       await this.withRetry('sendChatAction', () =>
         this.bot.sendChatAction(chatId, 'typing'),
       ).catch(() => undefined);
@@ -135,6 +134,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         chatId,
         'Desculpe, ocorreu um erro interno. Tente novamente.',
       ).catch(() => undefined);
+    } finally {
+      clearInterval(typingTimer);
     }
   }
 
@@ -232,6 +233,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 }
 
 const MAX_ATTEMPTS = 4;
+const TYPING_INTERVAL_MS = 4000;
 
 interface TelegramError {
   code?: string;

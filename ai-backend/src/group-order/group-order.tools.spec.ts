@@ -105,6 +105,12 @@ describe('GroupOrderTools', () => {
       expect(merged.map((t) => t.name)).not.toContain('finish_order');
     });
 
+    it('valor vazio usa o padrão (e casa o submitOrder)', () => {
+      process.env.MCP_CHECKOUT_TOOL_PATTERN = '';
+      expect(tools.isCheckoutTool('submitOrder')).toBe(true);
+      expect(tools.isCheckoutTool('getCart')).toBe(false);
+    });
+
     it('um padrão inválido cai no padrão seguro em vez de quebrar', () => {
       process.env.MCP_CHECKOUT_TOOL_PATTERN = '(';
       expect(tools.isCheckoutTool('cart_checkout')).toBe(true);

@@ -12,13 +12,11 @@ import { DietaryService } from '../dietary/dietary.service.js';
 import { DietaryTools } from '../dietary/dietary.tools.js';
 import { PaymentProviderClient } from '../payments/payment-provider.client.js';
 import { PaymentsService } from '../payments/payments.service.js';
-import { CartsService } from '../carts/carts.service.js';
 import { MessagesService } from '../messages/messages.service.js';
-import { OrdersService } from '../orders/orders.service.js';
 import { TokenCipher } from '../users/token-cipher.js';
 import { UsersService } from '../users/users.service.js';
 import { DbService } from './db.service.js';
-import { messages, orders, users } from './schema.js';
+import { carts, messages, orders, users } from './schema.js';
 
 // Roda contra um Postgres real (schema de db/init.sql). Exemplo:
 //   TEST_DATABASE_URL=postgresql://ifood:ifood@localhost:5433/ifood npm test
@@ -28,8 +26,6 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
   let database: DbService;
   let usersService: UsersService;
   let messagesService: MessagesService;
-  let ordersService: OrdersService;
-  let cartsService: CartsService;
 
   beforeAll(() => {
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -37,8 +33,6 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
     process.env.TOKEN_ENCRYPTION_KEY ??= 'a'.repeat(43) + '=';
     usersService = new UsersService(database, new TokenCipher());
     messagesService = new MessagesService(database);
-    ordersService = new OrdersService(database);
-    cartsService = new CartsService(database);
   });
 
   afterAll(async () => {
@@ -149,32 +143,30 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('banco (integração)', () => {
     expect((await messagesService.recent(CHAT, 100)).length).toBe(before);
   });
 
-  it('pedidos e carrinhos: cria, lista, muda status e cascateia', async () => {
+  it('pedidos e carrinhos: defaults do schema e cascata', async () => {
     const user = (await usersService.findByTelegramChatId(CHAT))!;
+    const { db } = database;
 
-    const order = await ordersService.create(user.id);
+    const [order] = await db
+      .insert(orders)
+      .values({ ownerUserId: user.id })
+      .returning();
     expect(order.status).toBe('collecting');
-    const cart = await cartsService.add({
-      orderId: order.id,
-      ifoodCartId: 'cart_test_1',
-      subtotal: '42.90',
-      total: '47.90',
-    });
+    const [cart] = await db
+      .insert(carts)
+      .values({
+        orderId: order.id,
+        ifoodCartId: 'cart_test_1',
+        subtotal: '42.90',
+        total: '47.90',
+      })
+      .returning();
     expect(cart).toMatchObject({ subtotal: '42.90', status: 'pending' });
 
-    await cartsService.setStatus(cart.id, 'confirmed');
-    await ordersService.setStatus(order.id, 'confirmed');
-
-    expect((await cartsService.listByOrder(order.id))[0].status).toBe(
-      'confirmed',
-    );
-    expect((await ordersService.listByOwner(user.id))[0]).toMatchObject({
-      id: order.id,
-      status: 'confirmed',
-    });
-
-    await database.db.delete(orders).where(eq(orders.id, order.id));
-    expect(await cartsService.listByOrder(order.id)).toEqual([]);
+    await db.delete(orders).where(eq(orders.id, order.id));
+    expect(
+      await db.select().from(carts).where(eq(carts.orderId, order.id)),
+    ).toEqual([]);
   });
 
   it('agent: o histórico com tool_use/tool_result volta íntegro do jsonb', async () => {

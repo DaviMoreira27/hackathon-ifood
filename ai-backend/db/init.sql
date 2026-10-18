@@ -142,4 +142,4 @@ CREATE INDEX idx_payments_cart  ON payments(cart_id);
 CREATE INDEX idx_cart_items_cart ON cart_items(cart_id);
 CREATE INDEX idx_orders_owner   ON orders(owner_user_id);
 CREATE INDEX idx_carts_order    ON carts(order_id);
-CREATE INDEX idx_messages_chat  ON messages(chat_id, created_at);
+CREATE INDEX idx_messages_chat  ON messages(chat_id, id);
